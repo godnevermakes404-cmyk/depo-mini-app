@@ -21,7 +21,6 @@ type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 export default function App() {
   const [user, setUser] = useState<{ name: string; role: UserRole; telegram_id?: number } | null>(null);
   
-  // Главная навигация
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [showAddModal, setShowAddModal] = useState(false);
   
@@ -64,7 +63,7 @@ export default function App() {
       if (tg) {
         tg.ready();
         tg.expand();
-        tg.setHeaderColor?.('bg_color'); // Красим системную шапку
+        tg.setHeaderColor?.('bg_color');
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
           tgUser = tg.initDataUnsafe.user;
           userName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || userName;
@@ -130,7 +129,6 @@ export default function App() {
   const canSignInspector = user?.role === 'Dispatcher' || user?.role === 'Inspector';
   const canSignCustomer = user?.role === 'Dispatcher' || user?.role === 'Customer';
 
-  // --- ФУНКЦИИ (Сокращены для объема, логика та же) ---
   async function handleToggleShop(shopId: string) {
     if (!canEditOps || !selectedCase) return;
     vibrate('medium');
@@ -222,7 +220,6 @@ export default function App() {
     vibrate('light'); setLoading(false); loadData();
   }
 
-  // Рендер контента в зависимости от выбранной вкладки снизу
   const renderContent = () => {
     switch (currentTab) {
       case 'home':
@@ -271,7 +268,6 @@ export default function App() {
               );
             })}
             
-            {/* FAB Кнопка Добавления */}
             {canEditOps && (
               <button className="fab" onClick={() => {vibrate('medium'); setShowAddModal(true);}}>+</button>
             )}
@@ -329,18 +325,15 @@ export default function App() {
 
   return (
     <div>
-      {/* Фирменная шапка */}
       <header className="brand-header">
         <h1 className="brand-title">ДЕПО</h1>
         <div style={{ width: '32px', height: '32px', background: 'var(--bg-color)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>🔔</div>
       </header>
 
-      {/* Основной контент */}
       <div className="content-area">
         {renderContent()}
       </div>
 
-      {/* Нижнее меню навигации */}
       <nav className="bottom-nav">
         <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => {vibrate('light'); setCurrentTab('home')}}>
           <div className="nav-icon">🏠</div><span>Главная</span>
@@ -363,6 +356,7 @@ export default function App() {
             <h3 style={{ margin: '0 0 16px 0' }}>Регистрация вагона</h3>
             <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="Номер вагона (8 цифр)" />
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Крытый</option></select>
+            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>ТОР</option><option>ДР</option><option>КР</option></select>
             <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
@@ -428,6 +422,20 @@ export default function App() {
               <button className={`list-btn ${signatures.master ? 'done' : ''}`} disabled={!canSignMaster} onClick={() => handleToggleSignature('master')}><span>👨‍🔧 Мастер</span>{signatures.master ? '✓' : 'Подписать'}</button>
               <button className={`list-btn ${signatures.inspector ? 'done' : ''}`} disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')}><span>🕵️‍♂️ Приёмщик</span>{signatures.inspector ? '✓' : 'Подписать'}</button>
               <button className={`list-btn ${signatures.customer ? 'done' : ''}`} disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')}><span>🏢 Заказчик</span>{signatures.customer ? '✓' : 'Подписать'}</button>
+            </div>
+
+            {/* ИСТОРИЯ ИЗМЕНЕНИЙ */}
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {statusHistory.map((ev: any) => (
+                  <div key={ev.event_id || ev.recorded_datetime} style={{ background: 'var(--bg-color)', padding: '8px 12px', borderRadius: '8px', fontSize: '12px' }}>
+                    <div style={{ fontWeight: 'bold' }}>{ev.new_status}</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
+                    {ev.comment && <div style={{ marginTop: '2px', fontStyle: 'italic' }}>{ev.comment}</div>}
+                  </div>
+                ))}
+              </div>
             </div>
 
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
