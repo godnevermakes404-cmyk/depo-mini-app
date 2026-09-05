@@ -3,7 +3,6 @@ import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import './App.css';
 
-// Объявляем глобальную переменную Telegram для TypeScript
 declare global {
   interface Window {
     Telegram: any;
@@ -77,7 +76,6 @@ export default function App() {
     let userName = 'Неизвестный пользователь';
 
     try {
-      // Пытаемся получить данные и через SDK, и через прямое обращение к window
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
         tg.ready();
@@ -381,6 +379,24 @@ export default function App() {
             <div style={{ background: '#e8f5e9', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Завершено</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2e7d32' }}>{completedCases.length}</div></div>
             <div style={{ background: '#ffebee', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Всего задержек</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#c62828' }}>{delayLogs.length}</div></div>
           </div>
+          
+          {/* СТАТИСТИКА ЗАДЕРЖЕК ПО КАТЕГОРИЯМ */}
+          <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>Причины задержек (Delay Log)</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {delayStats.map(stat => (
+                <div key={stat.category}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
+                    <span><b>{stat.category}</b></span>
+                    <span>{stat.count} случаев</span>
+                  </div>
+                  <div style={{ background: '#f0f0f0', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: delayLogs.length > 0 ? `${(stat.count / delayLogs.length) * 100}%` : '0%', background: '#d32f2f', height: '100%' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -428,6 +444,18 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '16px', marginTop: '8px' }}>
               {documents.map((d: any) => (<div key={d.id} style={{ background: '#e8f5e9', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', display: 'flex', justifyContent: 'space-between' }}><span><b>{d.doc_type}</b> № {d.doc_number}</span><span style={{ color: '#666' }}>{d.doc_date}</span></div>))}
+            </div>
+
+            {/* ИСТОРИЯ ИЗМЕНЕНИЙ (STATUS EVENTS) */}
+            <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>История изменений:</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
+              {statusHistory.map((ev: any) => (
+                <div key={ev.event_id || ev.recorded_datetime} style={{ background: '#f9f9f9', padding: '8px', borderRadius: '6px', borderLeft: '3px solid #0088cc', fontSize: '12px' }}>
+                  <div>Статус: <b>{ev.new_status}</b></div>
+                  <div style={{ color: '#666', fontSize: '11px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
+                  {ev.comment && <div style={{ color: '#444', fontStyle: 'italic', marginTop: '2px' }}>{ev.comment}</div>}
+                </div>
+              ))}
             </div>
 
             <button onClick={() => setSelectedCase(null)} style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px' }}>Закрыть</button>
