@@ -36,9 +36,9 @@ export default function App() {
   const [view, setView] = useState<'dashboard' | 'add_wagon'>('dashboard');
   
   const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [shopProgress, setShopProgress] = useState<Record<string, boolean>>({
-    telezhka: false, kolesa: false, malyarka: false, sborka: false
-  });
+  const [shopProgress, setShopProgress] = useState<Record<string, boolean>>({ telezhka: false, kolesa: false, malyarka: false, sborka: false });
+  const [signatures, setSignatures] = useState<Record<string, boolean>>({ master: false, inspector: false, customer: false });
+  
   const [activeDelay, setActiveDelay] = useState<any>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -80,21 +80,12 @@ export default function App() {
       const tgIdStr = tgUser.id.toString();
       const userName = `${tgUser.first_name} ${tgUser.last_name || ''}`.trim();
 
-      const { data: dbUser } = await supabase
-        .from('users')
-        .select('*')
-        .eq('telegram_id', tgIdStr)
-        .maybeSingle();
+      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
         setUser({ name: userName, role: dbUser.role as any || 'Dispatcher', telegram_id: tgUser.id });
       } else {
-        const { data: newUser } = await supabase
-          .from('users')
-          .insert([{ telegram_id: tgIdStr, full_name: userName, role: 'Dispatcher' }])
-          .select()
-          .maybeSingle();
-
+        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgIdStr, full_name: userName, role: 'Dispatcher' }]).select().maybeSingle();
         setUser({ name: userName, role: newUser?.role || 'Dispatcher', telegram_id: tgUser.id });
       }
     } else {
@@ -115,6 +106,7 @@ export default function App() {
         sla_deadline,
         updated_at,
         shop_progress,
+        signatures,
         wagons ( wagon_number, wagon_type, owner_type )
       `)
       .order('created_at', { ascending: false });
@@ -136,34 +128,19 @@ export default function App() {
   async function openCaseDetails(item: any) {
     setSelectedCase(item);
     setShopProgress(item.shop_progress || { telezhka: false, kolesa: false, malyarka: false, sborka: false });
+    setSignatures(item.signatures || { master: false, inspector: false, customer: false });
     
     if (item.current_status === '08 REPAIR_PAUSED') {
-      const { data: delay } = await supabase
-        .from('delay_log')
-        .select('*')
-        .eq('repair_id', item.repair_id)
-        .is('end_datetime', null)
-        .order('start_datetime', { ascending: false })
-        .maybeSingle();
+      const { data: delay } = await supabase.from('delay_log').select('*').eq('repair_id', item.repair_id).is('end_datetime', null).order('start_datetime', { ascending: false }).maybeSingle();
       setActiveDelay(delay);
     } else {
       setActiveDelay(null);
     }
 
-    const { data: events } = await supabase
-      .from('status_events')
-      .select('*')
-      .eq('repair_id', item.repair_id)
-      .order('recorded_datetime', { ascending: false });
-
+    const { data: events } = await supabase.from('status_events').select('*').eq('repair_id', item.repair_id).order('recorded_datetime', { ascending: false });
     if (events) setStatusHistory(events);
 
-    const { data: docs } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('repair_id', item.repair_id)
-      .order('created_at', { ascending: false });
-
+    const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
     if (docs) setDocuments(docs);
   }
 
@@ -174,11 +151,7 @@ export default function App() {
     setShopProgress(newProgress);
 
     try {
-      await supabase
-        .from('repair_cases')
-        .update({ shop_progress: newProgress })
-        .eq('repair_id', selectedCase.repair_id);
-
+      await supabase.from('repair_cases').update({ shop_progress: newProgress }).eq('repair_id', selectedCase.repair_id);
       const shopName = SHOPS.find(s => s.id === shopId)?.name;
       const action = newProgress[shopId] ? 'выполнен' : 'отменен';
 
@@ -195,6 +168,44 @@ export default function App() {
     }
   }
 
+  async function handleToggleSignature(sigKey: 'master' | 'inspector' | 'customer') {
+    if (!selectedCase) return;
+
+    const newSigs = { ...signatures, [sigKey]: !signatures[sigKey] };
+    setSignatures(newSigs);
+
+    try {
+      await supabase.from('repair_cases').update({ signatures: newSigs }).eq('repair_id', selectedCase.repair_id);
+      
+      const sigNames: Record<string, string> = { master: 'Мастер цеха', inspector: 'Приёмщик ВК', customer: 'Представитель Заказчика' };
+      const statusText = newSigs[sigKey] ? 'подписал' : 'отплавал подпись';
+
+      await supabase.from('status_events').insert([{
+        repair_id: selectedCase.repair_id,
+        previous_status: selectedCase.current_status,
+        new_status: selectedCase.current_status,
+        comment: `Согласование ВУ-36М: ${sigNames[sigKey]} ${statusText} [${user?.name}]`
+      }]);
+
+      // Автогенерация ВУ-36М при 100% подписей
+      if (newSigs.master && newSigs.inspector && newSigs.customer) {
+        const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
+        await supabase.from('documents').insert([{
+          repair_id: selectedCase.repair_id,
+          doc_type: 'VU-36',
+          doc_number: autoDocNum,
+          doc_date: new Date().toISOString().split('T')[0]
+        }]);
+        alert(`Все 3 подписи получены! Акт ВУ-36М № ${autoDocNum} сформирован автоматически.`);
+        openCaseDetails(selectedCase);
+      }
+
+      loadData();
+    } catch (err: any) {
+      alert('Ошибка подписи: ' + err.message);
+    }
+  }
+
   async function handleCreateRepair() {
     if (user?.role === 'Customer') return;
     if (!wagonNumber.trim()) { alert('Введите номер вагона'); return; }
@@ -202,20 +213,12 @@ export default function App() {
 
     try {
       let wagonId: string | null = null;
-      const { data: existingWagon } = await supabase
-        .from('wagons')
-        .select('id')
-        .eq('wagon_number', wagonNumber)
-        .maybeSingle();
+      const { data: existingWagon } = await supabase.from('wagons').select('id').eq('wagon_number', wagonNumber).maybeSingle();
 
       if (existingWagon) {
         wagonId = existingWagon.id;
       } else {
-        const { data: newWagon, error: wagonError } = await supabase
-          .from('wagons')
-          .insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }])
-          .select().single();
-
+        const { data: newWagon, error: wagonError } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }]).select().single();
         if (wagonError || !newWagon) throw wagonError;
         wagonId = newWagon.id;
       }
@@ -223,16 +226,14 @@ export default function App() {
       const hours = SLA_HOURS[repairType] || 72;
       const slaDeadline = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
-      const { data: repairCase, error: repairError } = await supabase
-        .from('repair_cases')
-        .insert([{ 
-          wagon_id: wagonId, 
-          repair_type: repairType, 
-          current_status: '01 PLANNED',
-          sla_deadline: slaDeadline,
-          shop_progress: { telezhka: false, kolesa: false, malyarka: false, sborka: false }
-        }])
-        .select().single();
+      const { data: repairCase, error: repairError } = await supabase.from('repair_cases').insert([{ 
+        wagon_id: wagonId, 
+        repair_type: repairType, 
+        current_status: '01 PLANNED',
+        sla_deadline: slaDeadline,
+        shop_progress: { telezhka: false, kolesa: false, malyarka: false, sborka: false },
+        signatures: { master: false, inspector: false, customer: false }
+      }]).select().single();
 
       if (repairError || !repairCase) throw repairError;
 
@@ -284,12 +285,7 @@ export default function App() {
     setLoading(true);
 
     try {
-      await supabase.from('delay_log').insert([{
-        repair_id: selectedCase.repair_id,
-        category: delayCategory,
-        cause: delayCause,
-        start_datetime: new Date().toISOString()
-      }]);
+      await supabase.from('delay_log').insert([{ repair_id: selectedCase.repair_id, category: delayCategory, cause: delayCause, start_datetime: new Date().toISOString() }]);
 
       await supabase.from('status_events').insert([{
         repair_id: selectedCase.repair_id,
@@ -298,11 +294,7 @@ export default function App() {
         comment: `Задержка (${delayCategory}): ${delayCause} [${user?.name}]`
       }]);
 
-      const { error } = await supabase
-        .from('repair_cases')
-        .update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() })
-        .eq('repair_id', selectedCase.repair_id);
-
+      const { error } = await supabase.from('repair_cases').update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
       if (error) throw error;
       alert('Ремонт заблокирован!');
       setShowDelayModal(false);
@@ -332,11 +324,7 @@ export default function App() {
         comment: `Задержка устранена. [Снял: ${user?.name}]`
       }]);
 
-      const { error } = await supabase
-        .from('repair_cases')
-        .update({ current_status: '07 IN_REPAIR', updated_at: now })
-        .eq('repair_id', selectedCase.repair_id);
-
+      const { error } = await supabase.from('repair_cases').update({ current_status: '07 IN_REPAIR', updated_at: now }).eq('repair_id', selectedCase.repair_id);
       if (error) throw error;
       alert('Задержка снята, вагон возвращен в ремонт!');
       setSelectedCase(null);
@@ -366,11 +354,7 @@ export default function App() {
         comment: `Смена статуса пользователем ${user?.name}`
       }]);
 
-      const { error } = await supabase
-        .from('repair_cases')
-        .update({ current_status: newStatus, updated_at: new Date().toISOString() })
-        .eq('repair_id', selectedCase.repair_id);
-
+      const { error } = await supabase.from('repair_cases').update({ current_status: newStatus, updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
       if (error) throw error;
       alert(`Статус изменен на: ${newStatus}`);
       setSelectedCase(null);
@@ -409,15 +393,14 @@ export default function App() {
   }));
 
   const canEdit = user?.role === 'Dispatcher' || user?.role === 'Master';
+  const isFullySigned = signatures.master && signatures.inspector && signatures.customer;
 
   return (
     <div style={{ padding: '16px', fontFamily: 'sans-serif', maxWidth: '480px', margin: '0 auto' }}>
       <header style={{ borderBottom: '1px solid #ccc', paddingBottom: '12px', marginBottom: '12px' }}>
         <h2 style={{ margin: 0, fontSize: '20px' }}>🚆 ДЕПО СЕЙЧАС</h2>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', marginBottom: '8px' }}>
-          <span style={{ color: '#444', fontSize: '13px', fontWeight: 'bold' }}>
-            👤 {user?.name || 'Загрузка...'}
-          </span>
+          <span style={{ color: '#444', fontSize: '13px', fontWeight: 'bold' }}>👤 {user?.name || 'Загрузка...'}</span>
           {getRoleBadge(user?.role)}
         </div>
 
@@ -467,6 +450,8 @@ export default function App() {
                 repairs.map((item: any) => {
                   const progressObj = item.shop_progress || {};
                   const doneShops = Object.values(progressObj).filter(Boolean).length;
+                  const sigObj = item.signatures || {};
+                  const doneSigs = Object.values(sigObj).filter(Boolean).length;
                   
                   return (
                     <div 
@@ -496,12 +481,11 @@ export default function App() {
                         {getSlaBadge(item.sla_deadline)}
                       </div>
 
-                      {/* Индикатор цехов */}
-                      <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px' }}>
-                        <span style={{ color: '#555' }}>Цехи: <b>{doneShops} из 4</b></span>
-                        <div style={{ width: '100px', background: '#f0f0f0', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-                          <div style={{ width: `${(doneShops / 4) * 100}%`, background: '#0088cc', height: '100%' }} />
-                        </div>
+                      <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed #eee', display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
+                        <span style={{ color: '#555' }}>Цехи: <b>{doneShops}/4</b></span>
+                        <span style={{ color: doneSigs === 3 ? '#2e7d32' : '#ed6c02', fontWeight: 'bold' }}>
+                          Подписи ВУ-36М: {doneSigs}/3
+                        </span>
                       </div>
                     </div>
                   );
@@ -625,7 +609,7 @@ export default function App() {
             </p>
 
             {/* ЧЕК-ЛИСТ ЦЕХОВ */}
-            <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '16px', border: '1px solid #d0d7de' }}>
+            <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #d0d7de' }}>
               <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#1976d2' }}>🏭 Чек-лист прохождения цехов:</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {SHOPS.map(shop => {
@@ -656,6 +640,52 @@ export default function App() {
               </div>
             </div>
 
+            {/* БЛОК СОГЛАСОВАНИЯ ВУ-36М */}
+            <div style={{ background: isFullySigned ? '#e8f5e9' : '#fff3e0', borderRadius: '8px', padding: '12px', marginBottom: '16px', border: isFullySigned ? '1px solid #81c784' : '1px solid #ffe0b2' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: isFullySigned ? '#2e7d32' : '#e65100' }}>
+                ✍️ Согласование акта ВУ-36М (Приёмка):
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <button
+                  disabled={!canEdit}
+                  onClick={() => handleToggleSignature('master')}
+                  style={{
+                    padding: '8px', display: 'flex', justifyContent: 'space-between',
+                    background: signatures.master ? '#c8e6c9' : '#fff',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canEdit ? 'pointer' : 'default'
+                  }}
+                >
+                  <span>👨‍🔧 1. Мастер цеха</span>
+                  <span>{signatures.master ? '✅ Подписано' : '❌ Ожидает'}</span>
+                </button>
+
+                <button
+                  disabled={!canEdit}
+                  onClick={() => handleToggleSignature('inspector')}
+                  style={{
+                    padding: '8px', display: 'flex', justifyContent: 'space-between',
+                    background: signatures.inspector ? '#c8e6c9' : '#fff',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canEdit ? 'pointer' : 'default'
+                  }}
+                >
+                  <span>🕵️‍♂️ 2. Приёмщик вагонов (ВК)</span>
+                  <span>{signatures.inspector ? '✅ Подписано' : '❌ Ожидает'}</span>
+                </button>
+
+                <button
+                  onClick={() => handleToggleSignature('customer')}
+                  style={{
+                    padding: '8px', display: 'flex', justifyContent: 'space-between',
+                    background: signatures.customer ? '#c8e6c9' : '#fff',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: 'pointer'
+                  }}
+                >
+                  <span>🏢 3. Представитель Заказчика</span>
+                  <span>{signatures.customer ? '✅ Подписано' : '❌ Ожидает'}</span>
+                </button>
+              </div>
+            </div>
+
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
               <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
                 <div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '13px', marginBottom: '4px' }}>
@@ -676,23 +706,28 @@ export default function App() {
               <>
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Сменить статус ремонта:</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
-                  {STATUSES.map(st => (
-                    <button
-                      key={st}
-                      disabled={st === selectedCase.current_status || loading}
-                      onClick={() => handleUpdateStatus(st)}
-                      style={{
-                        padding: '8px 12px', textAlign: 'left',
-                        background: st === '08 REPAIR_PAUSED' ? '#ffebee' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5',
-                        border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
-                        color: st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
-                        borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
-                        fontWeight: st === '08 REPAIR_PAUSED' ? 'bold' : 'normal'
-                      }}
-                    >
-                      {st === '08 REPAIR_PAUSED' ? '⛔ 08 REPAIR_PAUSED (Заблокировать)' : st}
-                    </button>
-                  ))}
+                  {STATUSES.map(st => {
+                    const isDoneBtn = st === '12 REPAIR_DONE';
+                    const isBlocked = isDoneBtn && !isFullySigned;
+
+                    return (
+                      <button
+                        key={st}
+                        disabled={st === selectedCase.current_status || loading || isBlocked}
+                        onClick={() => handleUpdateStatus(st)}
+                        style={{
+                          padding: '8px 12px', textAlign: 'left',
+                          background: st === '08 REPAIR_PAUSED' ? '#ffebee' : isBlocked ? '#f5f5f5' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5',
+                          border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
+                          color: isBlocked ? '#aaa' : st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
+                          borderRadius: '6px', cursor: isBlocked ? 'not-allowed' : 'pointer', fontSize: '13px',
+                          fontWeight: st === '08 REPAIR_PAUSED' || isDoneBtn ? 'bold' : 'normal'
+                        }}
+                      >
+                        {isDoneBtn && !isFullySigned ? '🔒 12 REPAIR_DONE (Нужно 3 подписи)' : st === '08 REPAIR_PAUSED' ? '⛔ 08 REPAIR_PAUSED (Заблокировать)' : st}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (ВУ-23, ВУ-36):</h4>
