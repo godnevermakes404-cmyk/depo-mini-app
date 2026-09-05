@@ -638,7 +638,7 @@ export default function App() {
                       style={{
                         padding: '8px 10px',
                         display: 'flex',
-                        justify: 'space-between',
+                        justifyContent: 'space-between',
                         alignItems: 'center',
                         background: isDone ? '#e8f5e9' : '#fff',
                         border: isDone ? '1px solid #81c784' : '1px solid #ccc',
