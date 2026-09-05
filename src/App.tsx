@@ -79,15 +79,25 @@ export default function App() {
     }
 
     if (tgUser?.id) {
-      const tgIdStr = tgUser.id.toString();
       const userName = `${tgUser.first_name} ${tgUser.last_name || ''}`.trim();
 
-      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
+      // Запрашиваем пользователя по числовому telegram_id
+      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
 
       if (dbUser) {
-        setUser({ name: userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
+        setUser({ name: dbUser.name || userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       } else {
-        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgIdStr, full_name: userName, role: 'Dispatcher' }]).select().maybeSingle();
+        // ИСПРАВЛЕНИЕ: Используем правильные названия колонок 'name' и передаем 'telegram_id' как число
+        const { data: newUser, error } = await supabase.from('users').insert([{ 
+          telegram_id: tgUser.id, 
+          name: userName, 
+          role: 'Dispatcher' 
+        }]).select().maybeSingle();
+
+        if (error) {
+          console.error("Ошибка создания пользователя:", error);
+        }
+
         setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       }
     } else {
@@ -179,18 +189,9 @@ export default function App() {
   async function handleToggleSignature(sigKey: 'master' | 'inspector' | 'customer') {
     if (!selectedCase) return;
 
-    if (sigKey === 'master' && !canSignMaster) {
-      alert('Ошибка доступа: Подписать может только Мастер цеха!');
-      return;
-    }
-    if (sigKey === 'inspector' && !canSignInspector) {
-      alert('Ошибка доступа: Подписать может только Приёмщик вагонов (ВК)!');
-      return;
-    }
-    if (sigKey === 'customer' && !canSignCustomer) {
-      alert('Ошибка доступа: Подписать может только Представитель Заказчика!');
-      return;
-    }
+    if (sigKey === 'master' && !canSignMaster) { alert('Ошибка доступа: Подписать может только Мастер цеха!'); return; }
+    if (sigKey === 'inspector' && !canSignInspector) { alert('Ошибка доступа: Подписать может только Приёмщик вагонов (ВК)!'); return; }
+    if (sigKey === 'customer' && !canSignCustomer) { alert('Ошибка доступа: Подписать может только Представитель Заказчика!'); return; }
 
     const newSigs = { ...signatures, [sigKey]: !signatures[sigKey] };
     setSignatures(newSigs);
@@ -640,17 +641,11 @@ export default function App() {
                       disabled={!canEditOps}
                       onClick={() => handleToggleShop(shop.id)}
                       style={{
-                        padding: '8px 10px',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
+                        padding: '8px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                         background: isDone ? '#e8f5e9' : '#fff',
                         border: isDone ? '1px solid #81c784' : '1px solid #ccc',
-                        borderRadius: '6px',
-                        cursor: canEditOps ? 'pointer' : 'not-allowed',
-                        opacity: canEditOps ? 1 : 0.7,
-                        fontSize: '12px',
-                        fontWeight: isDone ? 'bold' : 'normal'
+                        borderRadius: '6px', cursor: canEditOps ? 'pointer' : 'not-allowed',
+                        opacity: canEditOps ? 1 : 0.7, fontSize: '12px', fontWeight: isDone ? 'bold' : 'normal'
                       }}
                     >
                       <span>{shop.name}</span>
@@ -667,7 +662,6 @@ export default function App() {
                 ✍️ Согласование акта ВУ-36М (Приёмка):
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {/* 1. Мастер цеха */}
                 <button
                   disabled={!canSignMaster}
                   onClick={() => handleToggleSignature('master')}
@@ -675,15 +669,13 @@ export default function App() {
                     padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     background: signatures.master ? '#c8e6c9' : canSignMaster ? '#fff' : '#f5f5f5',
                     border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
-                    cursor: canSignMaster ? 'pointer' : 'not-allowed',
-                    opacity: canSignMaster ? 1 : 0.6
+                    cursor: canSignMaster ? 'pointer' : 'not-allowed', opacity: canSignMaster ? 1 : 0.6
                   }}
                 >
                   <span>👨‍🔧 1. Мастер цеха</span>
                   <span>{signatures.master ? '✅ Подписано' : canSignMaster ? '❌ Подписать' : '🔒 Нет прав'}</span>
                 </button>
 
-                {/* 2. Приёмщик ВК */}
                 <button
                   disabled={!canSignInspector}
                   onClick={() => handleToggleSignature('inspector')}
@@ -691,15 +683,13 @@ export default function App() {
                     padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     background: signatures.inspector ? '#c8e6c9' : canSignInspector ? '#fff' : '#f5f5f5',
                     border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
-                    cursor: canSignInspector ? 'pointer' : 'not-allowed',
-                    opacity: canSignInspector ? 1 : 0.6
+                    cursor: canSignInspector ? 'pointer' : 'not-allowed', opacity: canSignInspector ? 1 : 0.6
                   }}
                 >
                   <span>🕵️‍♂️ 2. Приёмщик вагонов (ВК)</span>
                   <span>{signatures.inspector ? '✅ Подписано' : canSignInspector ? '❌ Подписать' : '🔒 Нет прав'}</span>
                 </button>
 
-                {/* 3. Представитель Заказчика */}
                 <button
                   disabled={!canSignCustomer}
                   onClick={() => handleToggleSignature('customer')}
@@ -707,8 +697,7 @@ export default function App() {
                     padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                     background: signatures.customer ? '#c8e6c9' : canSignCustomer ? '#fff' : '#f5f5f5',
                     border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
-                    cursor: canSignCustomer ? 'pointer' : 'not-allowed',
-                    opacity: canSignCustomer ? 1 : 0.6
+                    cursor: canSignCustomer ? 'pointer' : 'not-allowed', opacity: canSignCustomer ? 1 : 0.6
                   }}
                 >
                   <span>🏢 3. Представитель Заказчика</span>
