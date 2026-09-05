@@ -10,25 +10,11 @@ declare global {
 }
 
 const STATUSES = [
-  '01 PLANNED',
-  '02 ARRIVED',
-  '04 QUEUE',
-  '07 IN_REPAIR',
-  '08 REPAIR_PAUSED',
-  '12 REPAIR_DONE',
-  '15 DEPARTED'
+  '01 PLANNED', '02 ARRIVED', '04 QUEUE', '07 IN_REPAIR',
+  '08 REPAIR_PAUSED', '12 REPAIR_DONE', '15 DEPARTED'
 ];
-
 const DELAY_CATEGORIES = ['Materials', 'Customer', 'Railway', 'Internal', 'Technical', 'External'];
-
-const SLA_HOURS: Record<string, number> = {
-  'ТОР': 24,
-  'ДР': 72,
-  'КР': 120,
-  'КРП': 144,
-  'Модернизация': 168
-};
-
+const SLA_HOURS: Record<string, number> = { 'ТОР': 24, 'ДР': 72, 'КР': 120, 'КРП': 144, 'Модернизация': 168 };
 const SHOPS = [
   { id: 'telezhka', name: '🛠️ Тележечный цех' },
   { id: 'kolesa', name: '⚙️ Колёсный цех' },
@@ -70,6 +56,15 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ onSite: 0, inRepair: 0, inQueue: 0, blocked: 0 });
 
+  // Функция для вибрации кнопок
+  const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
+    try {
+      if (window.Telegram?.WebApp?.HapticFeedback) {
+        window.Telegram.WebApp.HapticFeedback.impactOccurred(style);
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     initAuthAndData();
   }, []);
@@ -77,58 +72,37 @@ export default function App() {
   async function initAuthAndData() {
     let tgUser: any = null;
     let userName = 'Неизвестный пользователь';
-
     try {
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
         tg.ready();
+        tg.expand(); // Разворачиваем аппку на весь экран
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
           tgUser = tg.initDataUnsafe.user;
           userName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || userName;
         }
       }
-    } catch (e) {
-      console.log('Запуск вне Telegram');
-    }
+    } catch (e) {}
 
     if (tgUser && tgUser.id) {
-      const { data: dbUser, error: fetchError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('telegram_id', tgUser.id)
-        .maybeSingle();
-
-      if (fetchError) console.error("Ошибка поиска пользователя:", fetchError.message);
-
+      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
       if (dbUser) {
         setUser({ name: dbUser.name || userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       } else {
-        const { data: newUser, error: insertError } = await supabase.from('users').insert([{ 
-          telegram_id: tgUser.id, 
-          name: userName, 
-          role: 'Dispatcher' 
-        }]).select().maybeSingle();
-
-        if (insertError) {
-          alert("Ошибка БД при регистрации пользователя: " + insertError.message);
-        }
+        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: userName, role: 'Dispatcher' }]).select().maybeSingle();
         setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       }
     } else {
       setUser({ name: 'Разработчик (Браузер)', role: 'Dispatcher' });
     }
-
     loadData();
   }
 
   async function loadData() {
-    const { data, error } = await supabase
-      .from('repair_cases')
-      .select(`
+    const { data, error } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, updated_at, shop_progress, signatures, input_defects, material_usage,
         wagons ( wagon_number, wagon_type, owner_type )
-      `)
-      .order('created_at', { ascending: false });
+      `).order('created_at', { ascending: false });
 
     if (!error && data) {
       setRepairs(data);
@@ -139,12 +113,12 @@ export default function App() {
         blocked: data.filter((d: any) => d.current_status === '08 REPAIR_PAUSED').length
       });
     }
-
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     if (delays) setDelayLogs(delays);
   }
 
   async function openCaseDetails(item: any) {
+    vibrate('light');
     setSelectedCase(item);
     setShopProgress(item.shop_progress || { telezhka: false, kolesa: false, malyarka: false, sborka: false });
     setSignatures(item.signatures || { master: false, inspector: false, customer: false });
@@ -154,9 +128,7 @@ export default function App() {
     if (item.current_status === '08 REPAIR_PAUSED') {
       const { data: delay } = await supabase.from('delay_log').select('*').eq('repair_id', item.repair_id).is('end_datetime', null).order('start_datetime', { ascending: false }).maybeSingle();
       setActiveDelay(delay);
-    } else {
-      setActiveDelay(null);
-    }
+    } else { setActiveDelay(null); }
 
     const { data: events } = await supabase.from('status_events').select('*').eq('repair_id', item.repair_id).order('recorded_datetime', { ascending: false });
     if (events) setStatusHistory(events);
@@ -172,214 +144,172 @@ export default function App() {
 
   async function handleToggleShop(shopId: string) {
     if (!canEditOps || !selectedCase) return;
+    vibrate('medium');
     const newProgress = { ...shopProgress, [shopId]: !shopProgress[shopId] };
     setShopProgress(newProgress);
-    try {
-      await supabase.from('repair_cases').update({ shop_progress: newProgress }).eq('repair_id', selectedCase.repair_id);
-      const shopName = SHOPS.find(s => s.id === shopId)?.name;
-      await supabase.from('status_events').insert([{
-        repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status,
-        comment: `Цех: ${shopName} - этап ${newProgress[shopId] ? 'выполнен' : 'отменен'} [${user?.name}]`
-      }]);
-      loadData();
-    } catch (err: any) { alert('Ошибка обновления: ' + err.message); }
+    await supabase.from('repair_cases').update({ shop_progress: newProgress }).eq('repair_id', selectedCase.repair_id);
+    const shopName = SHOPS.find(s => s.id === shopId)?.name;
+    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status, comment: `Цех: ${shopName} - этап ${newProgress[shopId] ? 'выполнен' : 'отменен'} [${user?.name}]` }]);
+    loadData();
   }
 
   async function handleToggleSignature(sigKey: 'master' | 'inspector' | 'customer') {
     if (!selectedCase) return;
-    if (sigKey === 'master' && !canSignMaster) { alert('Подписать может только Мастер цеха!'); return; }
-    if (sigKey === 'inspector' && !canSignInspector) { alert('Подписать может только Приёмщик ВК!'); return; }
-    if (sigKey === 'customer' && !canSignCustomer) { alert('Подписать может только Заказчик!'); return; }
+    if (sigKey === 'master' && !canSignMaster) { alert('Только Мастер цеха!'); vibrate('heavy'); return; }
+    if (sigKey === 'inspector' && !canSignInspector) { alert('Только Приёмщик ВК!'); vibrate('heavy'); return; }
+    if (sigKey === 'customer' && !canSignCustomer) { alert('Только Заказчик!'); vibrate('heavy'); return; }
 
+    vibrate('medium');
     const newSigs = { ...signatures, [sigKey]: !signatures[sigKey] };
     setSignatures(newSigs);
+    await supabase.from('repair_cases').update({ signatures: newSigs }).eq('repair_id', selectedCase.repair_id);
+    const sigNames: Record<string, string> = { master: 'Мастер цеха', inspector: 'Приёмщик ВК', customer: 'Представитель Заказчика' };
+    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status, comment: `Согласование ВУ-36М: ${sigNames[sigKey]} ${newSigs[sigKey] ? 'подписал' : 'отозвал подпись'} [${user?.name}]` }]);
 
-    try {
-      await supabase.from('repair_cases').update({ signatures: newSigs }).eq('repair_id', selectedCase.repair_id);
-      const sigNames: Record<string, string> = { master: 'Мастер цеха', inspector: 'Приёмщик ВК', customer: 'Представитель Заказчика' };
-      await supabase.from('status_events').insert([{
-        repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status,
-        comment: `Согласование ВУ-36М: ${sigNames[sigKey]} ${newSigs[sigKey] ? 'подписал' : 'отозвал подпись'} [${user?.name}]`
-      }]);
-
-      if (newSigs.master && newSigs.inspector && newSigs.customer) {
-        const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
-        await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: 'ВУ-36М', doc_number: autoDocNum, doc_date: new Date().toISOString().split('T')[0] }]);
-        alert(`Все 3 подписи получены! Акт ВУ-36М № ${autoDocNum} сформирован автоматически.`);
-        openCaseDetails(selectedCase);
-      }
-      loadData();
-    } catch (err: any) { alert('Ошибка подписи: ' + err.message); }
+    if (newSigs.master && newSigs.inspector && newSigs.customer) {
+      const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
+      await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: 'ВУ-36М', doc_number: autoDocNum, doc_date: new Date().toISOString().split('T')[0] }]);
+      vibrate('heavy');
+      alert(`Все 3 подписи получены! Акт ВУ-36М № ${autoDocNum} сформирован автоматически.`);
+      openCaseDetails(selectedCase);
+    }
+    loadData();
   }
 
   async function handleSaveTechData() {
     if (!canEditOps || !selectedCase) return;
     setLoading(true);
-    try {
-      await supabase.from('repair_cases')
-        .update({ input_defects: inputDefects, material_usage: materialUsage })
-        .eq('repair_id', selectedCase.repair_id);
-      alert('Данные о дефектах и материалах сохранены!');
-      loadData();
-    } catch(err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    await supabase.from('repair_cases').update({ input_defects: inputDefects, material_usage: materialUsage }).eq('repair_id', selectedCase.repair_id);
+    vibrate('light');
+    setLoading(false);
+    loadData();
   }
 
   async function handleCreateRepair() {
     if (!canEditOps) return;
     if (!wagonNumber.trim()) { alert('Введите номер вагона'); return; }
+    vibrate('light');
     setLoading(true);
     try {
       let wagonId: string | null = null;
       const { data: existingWagon } = await supabase.from('wagons').select('id').eq('wagon_number', wagonNumber).maybeSingle();
       if (existingWagon) { wagonId = existingWagon.id; } 
       else {
-        const { data: newWagon, error: wErr } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }]).select().single();
-        if (wErr || !newWagon) throw wErr;
-        wagonId = newWagon.id;
+        const { data: newWagon } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }]).select().single();
+        wagonId = newWagon?.id;
       }
       const slaDeadline = new Date(Date.now() + (SLA_HOURS[repairType] || 72) * 60 * 60 * 1000).toISOString();
-      const { data: repairCase, error: rErr } = await supabase.from('repair_cases').insert([{ 
+      const { data: repairCase } = await supabase.from('repair_cases').insert([{ 
         wagon_id: wagonId, repair_type: repairType, current_status: '01 PLANNED', sla_deadline: slaDeadline,
         shop_progress: { telezhka: false, kolesa: false, malyarka: false, sborka: false }, signatures: { master: false, inspector: false, customer: false }
       }]).select().single();
-      if (rErr || !repairCase) throw rErr;
       await supabase.from('status_events').insert([{ repair_id: repairCase.repair_id, new_status: '01 PLANNED', comment: `Регистрация (${user?.name})` }]);
-      alert('Успешно! Вагон зарегистрирован.');
       setWagonNumber(''); setView('dashboard'); loadData();
-    } catch (err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    } finally { setLoading(false); }
   }
 
   async function handleAddDocument() {
-    if (!canEditOps) return;
-    if (!docNumber.trim() || !selectedCase) { alert('Введите номер'); return; }
+    if (!canEditOps || !docNumber.trim() || !selectedCase) return;
+    vibrate('light');
     setLoading(true);
-    try {
-      await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0] }]);
-      alert(`Документ прикреплен!`); setDocNumber(''); openCaseDetails(selectedCase);
-    } catch (err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0] }]);
+    setDocNumber(''); openCaseDetails(selectedCase);
+    setLoading(false);
   }
 
   async function handleConfirmDelay() {
-    if (!canEditOps) return;
-    if (!delayCause.trim()) { alert('Укажите причину'); return; }
+    if (!canEditOps || !delayCause.trim()) return;
+    vibrate('heavy');
     setLoading(true);
-    try {
-      await supabase.from('delay_log').insert([{ repair_id: selectedCase.repair_id, category: delayCategory, cause: delayCause, start_datetime: new Date().toISOString() }]);
-      await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: '08 REPAIR_PAUSED', comment: `Задержка: ${delayCause} [${user?.name}]` }]);
-      await supabase.from('repair_cases').update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
-      alert('Ремонт заблокирован!'); setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); loadData();
-    } catch (err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    await supabase.from('delay_log').insert([{ repair_id: selectedCase.repair_id, category: delayCategory, cause: delayCause, start_datetime: new Date().toISOString() }]);
+    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: '08 REPAIR_PAUSED', comment: `Задержка: ${delayCause} [${user?.name}]` }]);
+    await supabase.from('repair_cases').update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
+    setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); loadData();
+    setLoading(false);
   }
 
   async function handleUnblockRepair() {
     if (!canEditOps || !selectedCase) return;
+    vibrate('medium');
     setLoading(true);
-    try {
-      const now = new Date().toISOString();
-      await supabase.from('delay_log').update({ end_datetime: now }).eq('repair_id', selectedCase.repair_id).is('end_datetime', null);
-      await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: '08 REPAIR_PAUSED', new_status: '07 IN_REPAIR', comment: `Задержка снята [${user?.name}]` }]);
-      await supabase.from('repair_cases').update({ current_status: '07 IN_REPAIR', updated_at: now }).eq('repair_id', selectedCase.repair_id);
-      alert('Задержка снята!'); setSelectedCase(null); loadData();
-    } catch (err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    const now = new Date().toISOString();
+    await supabase.from('delay_log').update({ end_datetime: now }).eq('repair_id', selectedCase.repair_id).is('end_datetime', null);
+    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: '08 REPAIR_PAUSED', new_status: '07 IN_REPAIR', comment: `Задержка снята [${user?.name}]` }]);
+    await supabase.from('repair_cases').update({ current_status: '07 IN_REPAIR', updated_at: now }).eq('repair_id', selectedCase.repair_id);
+    setSelectedCase(null); loadData();
+    setLoading(false);
   }
 
   async function handleUpdateStatus(newStatus: string) {
     if (!canEditOps || !selectedCase) return;
     if (newStatus === '08 REPAIR_PAUSED') { setShowDelayModal(true); return; }
+    vibrate('light');
     setLoading(true);
-    try {
-      await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: newStatus, comment: `Смена статуса [${user?.name}]` }]);
-      await supabase.from('repair_cases').update({ current_status: newStatus, updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
-      alert(`Статус: ${newStatus}`); setSelectedCase(null); loadData();
-    } catch (err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
+    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: newStatus, comment: `Смена статуса [${user?.name}]` }]);
+    await supabase.from('repair_cases').update({ current_status: newStatus, updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
+    setSelectedCase(null); loadData();
+    setLoading(false);
   }
 
   function getSlaBadge(deadline: string) {
     if (!deadline) return null;
     const diffHours = (new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60);
-    if (diffHours < 0) return <span style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: '11px' }}>⚠️ Просрочен</span>;
-    return <span style={{ color: '#2e7d32', fontSize: '11px' }}>⏱ {Math.round(diffHours)} ч</span>;
-  }
-
-  function getRoleBadge(role?: UserRole) {
-    switch (role) {
-      case 'Dispatcher': return <span style={{ background: '#e3f2fd', color: '#1976d2', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Диспетчер</span>;
-      case 'Master': return <span style={{ background: '#fff3e0', color: '#ed6c02', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Мастер</span>;
-      case 'Inspector': return <span style={{ background: '#f3e5f5', color: '#7b1fa2', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Приёмщик ВК</span>;
-      case 'Customer': return <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Заказчик</span>;
-      default: return null;
-    }
+    if (diffHours < 0) return <span style={{ color: 'var(--danger)', fontWeight: 'bold', fontSize: '11px' }}>⚠️ Просрочен</span>;
+    return <span style={{ color: 'var(--success)', fontSize: '11px', fontWeight: 'bold' }}>⏱ {Math.round(diffHours)} ч</span>;
   }
 
   const completedCases = repairs.filter((r: any) => r.current_status === '12 REPAIR_DONE' || r.current_status === '15 DEPARTED');
-  const totalCases = repairs.length || 1;
-  const onTimeCases = repairs.filter((r: any) => !r.sla_deadline || new Date(r.sla_deadline).getTime() >= Date.now()).length;
-  const slaCompliance = Math.round((onTimeCases / totalCases) * 100);
   const delayStats = DELAY_CATEGORIES.map(cat => ({ category: cat, count: delayLogs.filter((d: any) => d.category === cat).length }));
   const isFullySigned = signatures.master && signatures.inspector && signatures.customer;
 
-  const currentMonth = new Date().getMonth();
-  const currentYear = new Date().getFullYear();
-  const monthlyReleases = completedCases.filter((c: any) => {
-    const d = new Date(c.updated_at || c.created_at);
-    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-  });
-
-  const releaseGroups = monthlyReleases.reduce((acc: any, curr: any) => {
-    const rt = curr.repair_type;
-    if (!acc[rt]) acc[rt] = [];
-    acc[rt].push(curr);
-    return acc;
-  }, {});
-
   return (
-    <div style={{ padding: '16px', fontFamily: 'sans-serif', maxWidth: '480px', margin: '0 auto' }}>
-      <header style={{ borderBottom: '1px solid #ccc', paddingBottom: '12px', marginBottom: '12px' }}>
-        <h2 style={{ margin: 0, fontSize: '20px' }}>🚆 ДЕПО СЕЙЧАС</h2>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', marginBottom: '8px' }}>
-          <span style={{ color: '#444', fontSize: '13px', fontWeight: 'bold' }}>👤 {user?.name || 'Загрузка...'}</span>
-          {getRoleBadge(user?.role)}
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={() => setTab('ops')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '6px', background: tab === 'ops' ? '#0088cc' : '#f0f0f0', color: tab === 'ops' ? '#fff' : '#333', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>📋 Операции</button>
-          <button onClick={() => setTab('analytics')} style={{ flex: 1, padding: '8px', border: 'none', borderRadius: '6px', background: tab === 'analytics' ? '#0088cc' : '#f0f0f0', color: tab === 'analytics' ? '#fff' : '#333', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>📊 Аналитика</button>
+    <div className="app-container">
+      {/* Шапка */}
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+        <div>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: '24px', fontWeight: '800' }}>🚆 ДЕПО</h2>
+          <span style={{ fontSize: '14px', color: 'var(--tg-hint)' }}>{user?.name} • <b style={{color: 'var(--tg-btn)'}}>{user?.role}</b></span>
         </div>
       </header>
+
+      {/* Вкладки */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', background: 'var(--tg-bg)', padding: '4px', borderRadius: '14px' }}>
+        <button onClick={() => {vibrate('light'); setTab('ops')}} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: tab === 'ops' ? 'var(--tg-btn)' : 'transparent', color: tab === 'ops' ? '#fff' : 'var(--tg-text)', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>📋 Операции</button>
+        <button onClick={() => {vibrate('light'); setTab('analytics')}} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: tab === 'analytics' ? 'var(--tg-btn)' : 'transparent', color: tab === 'analytics' ? '#fff' : 'var(--tg-text)', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>📊 Аналитика</button>
+      </div>
 
       {tab === 'ops' ? (
         view === 'dashboard' ? (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-              <div style={{ background: '#f0f4f8', padding: '10px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Всего ремонтов</div><div style={{ fontSize: '20px', fontWeight: 'bold' }}>{stats.onSite}</div></div>
-              <div style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>В ремонте</div><div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1976d2' }}>{stats.inRepair}</div></div>
-              <div style={{ background: '#fff3e0', padding: '10px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>В очереди</div><div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ed6c02' }}>{stats.inQueue}</div></div>
-              <div style={{ background: '#ffebee', padding: '10px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Заблокировано</div><div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{stats.blocked}</div></div>
+            <div className="stats-grid">
+              <div className="stat-box"><span className="stat-label">Всего вагонов</span><span className="stat-value">{stats.onSite}</span></div>
+              <div className="stat-box highlight"><span className="stat-label" style={{color: '#1976d2'}}>В ремонте</span><span className="stat-value" style={{color: '#1976d2'}}>{stats.inRepair}</span></div>
+              <div className="stat-box"><span className="stat-label">В очереди</span><span className="stat-value" style={{color: 'var(--warning)'}}>{stats.inQueue}</span></div>
+              <div className="stat-box danger"><span className="stat-label" style={{color: '#d32f2f'}}>Задержано</span><span className="stat-value" style={{color: '#d32f2f'}}>{stats.blocked}</span></div>
             </div>
 
-            {canEditOps ? (
-              <button onClick={() => setView('add_wagon')} style={{ width: '100%', padding: '12px', backgroundColor: '#0088cc', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '20px' }}>
-                + Зарегистрировать вагон
-              </button>
-            ) : (
-              <div style={{ padding: '8px', background: '#e8f5e9', color: '#2e7d32', borderRadius: '6px', fontSize: '12px', textAlign: 'center', marginBottom: '16px' }}>👁️ Режим роли «{user?.role}»</div>
+            {canEditOps && (
+              <button className="btn-primary" onClick={() => {vibrate('light'); setView('add_wagon')}} style={{ marginBottom: '24px' }}>+ Зарегистрировать вагон</button>
             )}
 
-            <h3 style={{ margin: '0 0 10px', fontSize: '16px' }}>Реестр вагонов на территории</h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {repairs.length === 0 ? <p style={{ color: '#888', fontSize: '14px' }}>Вагонов пока нет</p> : repairs.map((item: any) => {
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '18px', fontWeight: '700' }}>Реестр вагонов</h3>
+            <div>
+              {repairs.length === 0 ? <p style={{ color: 'var(--tg-hint)' }}>Пусто</p> : repairs.map((item: any) => {
                 const doneShops = Object.values(item.shop_progress || {}).filter(Boolean).length;
-                const doneSigs = Object.values(item.signatures || {}).filter(Boolean).length;
+                const isPaused = item.current_status === '08 REPAIR_PAUSED';
                 return (
-                  <div key={item.repair_id} onClick={() => openCaseDetails(item)} style={{ background: item.current_status === '08 REPAIR_PAUSED' ? '#fff5f5' : '#fff', border: item.current_status === '08 REPAIR_PAUSED' ? '1px solid #ffcdd2' : '1px solid #e0e0e0', borderRadius: '8px', padding: '12px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div key={item.repair_id} className="card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isPaused ? '4px solid var(--danger)' : '4px solid var(--tg-btn)', cursor: 'pointer' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 'bold', fontSize: '16px' }}>№ {item.wagons?.wagon_number || 'Неизвестен'}</span>
-                      <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '12px', background: item.current_status === '08 REPAIR_PAUSED' ? '#ffebee' : item.current_status === '07 IN_REPAIR' ? '#e3f2fd' : '#f5f5f5', color: item.current_status === '08 REPAIR_PAUSED' ? '#c62828' : item.current_status === '07 IN_REPAIR' ? '#1976d2' : '#333', fontWeight: 'bold' }}>{item.current_status}</span>
+                      <span style={{ fontSize: '18px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
+                      <span style={{ fontSize: '12px', fontWeight: '700', padding: '4px 8px', borderRadius: '8px', background: isPaused ? 'rgba(239, 68, 68, 0.1)' : 'var(--tg-sec-bg)', color: isPaused ? 'var(--danger)' : 'var(--tg-text)' }}>{item.current_status}</span>
                     </div>
-                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Тип: <b>{item.repair_type}</b> ({item.wagons?.wagon_type})</span>{getSlaBadge(item.sla_deadline)}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '13px', color: 'var(--tg-hint)' }}>
+                      <span>{item.repair_type} ({item.wagons?.wagon_type})</span>
+                      {getSlaBadge(item.sla_deadline)}
                     </div>
-                    <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed #eee', display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                      <span style={{ color: '#555' }}>Цехи: <b>{doneShops}/4</b></span><span style={{ color: doneSigs === 3 ? '#2e7d32' : '#ed6c02', fontWeight: 'bold' }}>Подписи ВУ-36М: {doneSigs}/3</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '12px', fontSize: '12px', fontWeight: '600' }}>
+                      <span style={{ color: doneShops === 4 ? 'var(--success)' : 'var(--tg-hint)' }}>🏭 Цехи: {doneShops}/4</span>
+                      <span style={{ color: Object.values(item.signatures || {}).filter(Boolean).length === 3 ? 'var(--success)' : 'var(--warning)' }}>✍️ ВУ-36М: {Object.values(item.signatures || {}).filter(Boolean).length}/3</span>
                     </div>
                   </div>
                 );
@@ -387,63 +317,43 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div style={{ background: '#f9f9f9', padding: '16px', borderRadius: '8px' }}>
-            <h3 style={{ marginTop: 0 }}>Регистрация вагона</h3>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Номер вагона: <input type="text" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }} /></label>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Род вагона: <select value={wagonType} onChange={e => setWagonType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}><option value="Полувагон">Полувагон</option><option value="Цистерна">Цистерна</option><option value="Крытый">Крытый</option><option value="Платформа">Платформа</option><option value="Хоппер">Хоппер</option></select></label>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>Собственность: <select value={ownerType} onChange={e => setOwnerType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select></label>
-            <label style={{ display: 'block', marginBottom: '16px', fontSize: '14px' }}>Вид ремонта: <select value={repairType} onChange={e => setRepairType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}><option value="ТОР">ТОР</option><option value="ДР">ДР</option><option value="КР">КР</option><option value="КРП">КРП</option><option value="Модернизация">Модернизация</option></select></label>
-            <button onClick={handleCreateRepair} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px' }}>{loading ? 'Сохранение...' : 'Создать Repair Case'}</button>
-            <button onClick={() => setView('dashboard')} style={{ width: '100%', padding: '10px', backgroundColor: '#ccc', border: 'none', borderRadius: '6px' }}>Отмена</button>
+          <div className="card">
+            <h3 style={{ margin: '0 0 16px 0' }}>Новый вагон</h3>
+            <label className="stat-label">Номер вагона</label>
+            <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="8 цифр" />
+            
+            <label className="stat-label" style={{marginTop: '12px', display:'block'}}>Тип вагона</label>
+            <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Крытый</option><option>Платформа</option></select>
+            
+            <label className="stat-label" style={{marginTop: '12px', display:'block'}}>Собственность</label>
+            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
+            
+            <label className="stat-label" style={{marginTop: '12px', display:'block'}}>Вид ремонта</label>
+            <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>ТОР</option><option>ДР</option><option>КР</option><option>КРП</option><option>Модернизация</option></select>
+            
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
+              <button className="btn-secondary" onClick={() => setView('dashboard')}>Отмена</button>
+              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>{loading ? '...' : 'Создать'}</button>
+            </div>
           </div>
         )
       ) : (
         <div>
-          <h3 style={{ marginTop: 0, fontSize: '16px' }}>📊 Аналитический дашборд</h3>
-          <div style={{ background: '#f5f5f5', borderRadius: '8px', padding: '16px', marginBottom: '16px', borderLeft: '4px solid #2e7d32' }}>
-            <div style={{ fontSize: '12px', color: '#666' }}>Соблюдение SLA (норматив)</div>
-            <div style={{ fontSize: '28px', fontWeight: 'bold', color: slaCompliance >= 80 ? '#2e7d32' : '#d32f2f', margin: '4px 0' }}>{slaCompliance}%</div>
-            <div style={{ background: '#e0e0e0', height: '8px', borderRadius: '4px', overflow: 'hidden' }}><div style={{ width: `${slaCompliance}%`, background: slaCompliance >= 80 ? '#4caf50' : '#f44336', height: '100%' }} /></div>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-            <div style={{ background: '#e8f5e9', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Завершено</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2e7d32' }}>{completedCases.length}</div></div>
-            <div style={{ background: '#ffebee', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Всего задержек</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#c62828' }}>{delayLogs.length}</div></div>
+          <div className="stats-grid">
+            <div className="stat-box highlight"><span className="stat-label">Выпуск (Мес)</span><span className="stat-value">{completedCases.length}</span></div>
+            <div className="stat-box danger"><span className="stat-label">Инциденты</span><span className="stat-value">{delayLogs.length}</span></div>
           </div>
           
-          <div style={{ background: '#fff', border: '1px solid #1976d2', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
-            <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#1976d2' }}>📋 Выпуск вагонов за текущий месяц</h4>
-            {Object.keys(releaseGroups).length === 0 ? (
-              <p style={{ fontSize: '12px', color: '#888' }}>Нет выпущенных вагонов в этом месяце</p>
-            ) : (
-              Object.keys(releaseGroups).map(rt => (
-                <div key={rt} style={{ marginBottom: '12px' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '12px', background: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{rt} (Тип ремонта)</span>
-                    <span>Итого: {releaseGroups[rt].length}</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '6px', fontSize: '12px', color: '#333' }}>
-                    {releaseGroups[rt].map((c: any) => (
-                       <div key={c.repair_id} style={{ padding: '4px', borderBottom: '1px solid #f0f0f0' }}>
-                         Вагон № {c.wagons?.wagon_number}
-                       </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
-            <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>Причины задержек (Delay Log)</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="card">
+            <h4 style={{ margin: '0 0 16px 0', fontSize: '16px' }}>Аналитика задержек</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {delayStats.map(stat => (
                 <div key={stat.category}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
-                    <span><b>{stat.category}</b></span>
-                    <span>{stat.count} случаев</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight:'600', marginBottom: '4px' }}>
+                    <span>{stat.category}</span><span>{stat.count}</span>
                   </div>
-                  <div style={{ background: '#f0f0f0', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: delayLogs.length > 0 ? `${(stat.count / delayLogs.length) * 100}%` : '0%', background: '#d32f2f', height: '100%' }} />
+                  <div style={{ background: 'var(--tg-sec-bg)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: delayLogs.length > 0 ? `${(stat.count / delayLogs.length) * 100}%` : '0%', background: 'var(--danger)', height: '100%', borderRadius:'4px' }} />
                   </div>
                 </div>
               ))}
@@ -452,186 +362,123 @@ export default function App() {
         </div>
       )}
 
-      {/* МОДАЛЬНОЕ ОКНО ВАГОНА В НОВОЙ ЛОГИЧЕСКОЙ ПОСЛЕДОВАТЕЛЬНОСТИ */}
+      {/* НАТИВНОЕ МОДАЛЬНОЕ ОКНО (BOTTOM SHEET) */}
       {selectedCase && !showDelayModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '380px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 4px' }}>Вагон № {selectedCase.wagons?.wagon_number}</h3>
-            <p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>Repair ID: {selectedCase.repair_id}</p>
+        <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
+          <div className="bottom-sheet">
+            <div className="sheet-handle"></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
+              <div>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '22px', fontWeight: '800' }}>№ {selectedCase.wagons?.wagon_number}</h3>
+                <span style={{ fontSize: '13px', color: 'var(--tg-hint)' }}>ID: {selectedCase.repair_id.split('-')[0]}...</span>
+              </div>
+              <button onClick={() => setSelectedCase(null)} style={{ background: 'var(--tg-sec-bg)', border: 'none', borderRadius: '50%', width: '32px', height: '32px', fontWeight: 'bold', color: 'var(--tg-hint)', cursor: 'pointer' }}>✕</button>
+            </div>
 
-            {/* ЭТАП 1: ПРИХОД, СТАУС И ПЕРВИЧНЫЕ ДОКУМЕНТЫ */}
-            <div style={{ background: '#f5f5f5', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #e0e0e0' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#333' }}>1️⃣ Приход и Входной контроль</h4>
+            {/* ЭТАП 1 */}
+            <div className="card" style={{ background: 'var(--tg-sec-bg)', border: 'none' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: 'var(--tg-btn)' }}>1️⃣ Входной контроль</h4>
               
               {canEditOps && (
-                <div style={{ marginBottom: '12px' }}>
-                  <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 6px' }}>Текущий этап ремонта:</p>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {STATUSES.map(st => {
-                      const isBlocked = st === '12 REPAIR_DONE' && !isFullySigned;
-                      return (
-                        <button
-                          key={st}
-                          disabled={st === selectedCase.current_status || loading || isBlocked}
-                          onClick={() => handleUpdateStatus(st)}
-                          style={{
-                            padding: '6px 10px', textAlign: 'left',
-                            background: st === '08 REPAIR_PAUSED' ? '#ffebee' : isBlocked ? '#f5f5f5' : st === selectedCase.current_status ? '#0088cc' : '#fff',
-                            border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
-                            color: st === selectedCase.current_status ? '#fff' : isBlocked ? '#aaa' : st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
-                            borderRadius: '4px', cursor: isBlocked ? 'not-allowed' : 'pointer', fontSize: '12px',
-                            fontWeight: st === selectedCase.current_status ? 'bold' : 'normal'
-                          }}
-                        >
-                          {isBlocked ? '🔒 12 REPAIR_DONE (Нужно 3 подписи)' : st === '08 REPAIR_PAUSED' ? '⛔ 08 REPAIR_PAUSED (Заблокировать)' : st}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div style={{ display: 'flex', overflowX: 'auto', gap: '8px', paddingBottom: '8px', marginBottom: '8px', msOverflowStyle: 'none', scrollbarWidth: 'none' }}>
+                  {STATUSES.map(st => {
+                    const isBlocked = st === '12 REPAIR_DONE' && !isFullySigned;
+                    const isCurrent = st === selectedCase.current_status;
+                    return (
+                      <button key={st} disabled={isCurrent || loading || isBlocked} onClick={() => handleUpdateStatus(st)} 
+                        style={{ padding: '8px 16px', borderRadius: '20px', border: 'none', whiteSpace: 'nowrap', fontWeight: '600', fontSize: '13px',
+                          background: isCurrent ? 'var(--tg-text)' : 'var(--tg-bg)', color: isCurrent ? 'var(--tg-bg)' : 'var(--tg-text)', opacity: isBlocked ? 0.4 : 1, boxShadow: '0 2px 6px rgba(0,0,0,0.05)'
+                        }}>
+                        {st.split(' ')[1]}
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
-              {/* Первичные документы */}
-              <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 6px' }}>Прикрепить документ (Справка 2612 / Акт):</p>
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
-                <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
-                  <option value="Справка 2612">Справка 2612</option>
-                  <option value="Акт осмотра">Акт осмотра</option>
-                  <option value="ВУ-23М">ВУ-23М</option>
-                  <option value="ВУ-22">ВУ-22</option>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                <select className="select-field" style={{ margin: 0, flex: 1 }} value={docType} onChange={e => setDocType(e.target.value)}>
+                  <option>Справка 2612</option><option>Акт осмотра</option><option>ВУ-23М</option>
                 </select>
-                <input type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }}/>
-                <button onClick={handleAddDocument} style={{ padding: '6px 10px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px' }}>+ Add</button>
+                <input className="input-field" type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ margin: 0, flex: 1 }}/>
+                <button className="btn-primary" style={{ width: 'auto', padding: '0 16px' }} onClick={handleAddDocument}>+</button>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '10px' }}>
-                {documents.map((d: any) => (
-                  <div key={d.id} style={{ background: '#fff', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', border: '1px solid #ddd' }}>
-                    <span><b>{d.doc_type}</b> № {d.doc_number}</span>
-                    <span style={{ color: '#888' }}>{d.doc_date}</span>
-                  </div>
-                ))}
-              </div>
+              {documents.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
+                  {documents.map((d: any) => (
+                    <span key={d.id} style={{ background: 'var(--tg-bg)', padding: '6px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: '500', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                      📄 {d.doc_type} №{d.doc_number}
+                    </span>
+                  ))}
+                </div>
+              )}
 
-              {/* Входные дефекты */}
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold' }}>
-                Входные дефекты (по Акту осмотра):
-                <textarea 
-                  disabled={!canEditOps} 
-                  value={inputDefects} 
-                  onChange={e => setInputDefects(e.target.value)} 
-                  placeholder="Например: Излом досок пола 0.6м3..." 
-                  rows={2} 
-                  style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px', fontWeight: 'normal' }} 
-                />
-              </label>
+              <label className="stat-label">Входные дефекты</label>
+              <textarea className="textarea-field" disabled={!canEditOps} value={inputDefects} onChange={e => setInputDefects(e.target.value)} placeholder="Например: Излом пола..." rows={2} />
             </div>
 
-            {/* ЭТАП 2: ВЫПОЛНЕНИЕ РЕМОНТА И МАТЕРИАЛЫ */}
-            <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #d0d7de' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#1976d2' }}>2️⃣ Прохождение ремонта и Цехи</h4>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+            {/* ЭТАП 2 */}
+            <div className="card" style={{ background: 'var(--tg-sec-bg)', border: 'none' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: 'var(--tg-btn)' }}>2️⃣ Прохождение цехов</h4>
+              <div style={{ marginBottom: '16px' }}>
                 {SHOPS.map(shop => {
                   const isDone = !!shopProgress[shop.id];
                   return (
-                    <button 
-                      key={shop.id} 
-                      disabled={!canEditOps} 
-                      onClick={() => handleToggleShop(shop.id)} 
-                      style={{ 
-                        padding: '8px', display: 'flex', justifyContent: 'space-between', 
-                        background: isDone ? '#e8f5e9' : '#fff', 
-                        border: isDone ? '1px solid #81c784' : '1px solid #ccc', 
-                        borderRadius: '6px', cursor: canEditOps ? 'pointer' : 'not-allowed', 
-                        opacity: canEditOps ? 1 : 0.7, fontSize: '12px', fontWeight: isDone ? 'bold' : 'normal' 
-                      }}
-                    >
+                    <button key={shop.id} className={`list-btn ${isDone ? 'done' : ''}`} disabled={!canEditOps} onClick={() => handleToggleShop(shop.id)}>
                       <span>{shop.name}</span>
-                      <span>{isDone ? '✅ Готово' : '⏳ В ожидании'}</span>
+                      {isDone && <span style={{ fontWeight:'bold' }}>✓</span>}
                     </button>
                   );
                 })}
               </div>
-
-              {/* Расход материалов */}
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold' }}>
-                Учёт материалов и резок (Цех 24):
-                <textarea 
-                  disabled={!canEditOps} 
-                  value={materialUsage} 
-                  onChange={e => setMaterialUsage(e.target.value)} 
-                  placeholder="Например: 1.25м х 0.90м = 10 шт. Лист на пол..." 
-                  rows={2} 
-                  style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px', fontWeight: 'normal' }} 
-                />
-              </label>
-
-              {canEditOps && (
-                <button onClick={handleSaveTechData} disabled={loading} style={{ width: '100%', marginTop: '8px', padding: '8px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
-                  💾 Сохранить дефекты и материалы
-                </button>
-              )}
+              <label className="stat-label">Учёт материалов (Цех 24)</label>
+              <textarea className="textarea-field" disabled={!canEditOps} value={materialUsage} onChange={e => setMaterialUsage(e.target.value)} placeholder="1.25м х 0.90м = 10 шт..." rows={2} />
+              {canEditOps && <button className="btn-primary" style={{ marginTop: '12px', padding: '10px' }} onClick={handleSaveTechData}>💾 Сохранить тексты</button>}
             </div>
 
-            {/* ЭТАП 3: ФИНАЛЬНАЯ ПРИЁМКА ВУ-36М */}
-            <div style={{ background: isFullySigned ? '#e8f5e9' : '#fff3e0', borderRadius: '8px', padding: '12px', marginBottom: '16px', border: isFullySigned ? '1px solid #81c784' : '1px solid #ffe0b2' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: isFullySigned ? '#2e7d32' : '#e65100' }}>3️⃣ Финальная приёмка (Акт ВУ-36М)</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <button disabled={!canSignMaster} onClick={() => handleToggleSignature('master')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.master ? '#c8e6c9' : canSignMaster ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignMaster ? 'pointer' : 'not-allowed', opacity: canSignMaster ? 1 : 0.6 }}>
-                  <span>👨‍🔧 1. Мастер цеха</span>
-                  <span>{signatures.master ? '✅ Подписано' : canSignMaster ? '❌ Подписать' : '🔒 Нет прав'}</span>
-                </button>
-                <button disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.inspector ? '#c8e6c9' : canSignInspector ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignInspector ? 'pointer' : 'not-allowed', opacity: canSignInspector ? 1 : 0.6 }}>
-                  <span>🕵️‍♂️ 2. Приёмщик ВК</span>
-                  <span>{signatures.inspector ? '✅ Подписано' : canSignInspector ? '❌ Подписать' : '🔒 Нет прав'}</span>
-                </button>
-                <button disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.customer ? '#c8e6c9' : canSignCustomer ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignCustomer ? 'pointer' : 'not-allowed', opacity: canSignCustomer ? 1 : 0.6 }}>
-                  <span>🏢 3. Заказчик</span>
-                  <span>{signatures.customer ? '✅ Подписано' : canSignCustomer ? '❌ Подписать' : '🔒 Нет прав'}</span>
-                </button>
-              </div>
+            {/* ЭТАП 3 */}
+            <div className="card" style={{ background: isFullySigned ? 'rgba(34, 197, 94, 0.1)' : 'var(--tg-sec-bg)', border: 'none' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: isFullySigned ? 'var(--success)' : 'var(--tg-btn)' }}>3️⃣ ВУ-36М (Финальная приёмка)</h4>
+              <button className={`list-btn ${signatures.master ? 'done' : ''}`} disabled={!canSignMaster} onClick={() => handleToggleSignature('master')}>
+                <span>👨‍🔧 Мастер цеха</span>{signatures.master ? '✓ Подписано' : 'Нажмите для подписи'}
+              </button>
+              <button className={`list-btn ${signatures.inspector ? 'done' : ''}`} disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')}>
+                <span>🕵️‍♂️ Приёмщик ВК</span>{signatures.inspector ? '✓ Подписано' : 'Нажмите для подписи'}
+              </button>
+              <button className={`list-btn ${signatures.customer ? 'done' : ''}`} disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')}>
+                <span>🏢 Заказчик</span>{signatures.customer ? '✓ Подписано' : 'Нажмите для подписи'}
+              </button>
             </div>
 
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
-              <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
-                <div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '13px' }}>⛔ Задержка: {activeDelay?.category}</div>
-                <div style={{ fontSize: '13px' }}>Причина: <b>{activeDelay?.cause}</b></div>
-                {canEditOps && (
-                  <button onClick={handleUnblockRepair} style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-                    ✅ Снять задержку
-                  </button>
-                )}
+              <div className="card" style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none' }}>
+                <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)' }}>⛔ Заблокировано: {activeDelay?.category}</h4>
+                <p style={{ margin: '0 0 12px 0', fontSize: '14px' }}>{activeDelay?.cause}</p>
+                {canEditOps && <button className="btn-primary" style={{ background: 'var(--success)' }} onClick={handleUnblockRepair}>Снять задержку</button>}
               </div>
             )}
-
-            {/* ЭТАП 4: ИСТОРИЯ ИЗМЕНЕНИЙ */}
-            <h4 style={{ margin: '16px 0 8px', fontSize: '13px', color: '#666' }}>📜 Журнал событий по вагону:</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
-              {statusHistory.map((ev: any) => (
-                <div key={ev.event_id || ev.recorded_datetime} style={{ background: '#f9f9f9', padding: '8px', borderRadius: '6px', borderLeft: '3px solid #0088cc', fontSize: '11px' }}>
-                  <div>Статус: <b>{ev.new_status}</b></div>
-                  <div style={{ color: '#888', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
-                  {ev.comment && <div style={{ color: '#444', fontStyle: 'italic', marginTop: '2px' }}>{ev.comment}</div>}
-                </div>
-              ))}
-            </div>
-
-            <button onClick={() => setSelectedCase(null)} style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-              Закрыть
-            </button>
+            
+            <div style={{ height: '20px' }}></div>
           </div>
         </div>
       )}
 
+      {/* Шторка задержки */}
       {showDelayModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 200 }}>
-          <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '360px' }}>
-            <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>⛔ Фиксация задержки</h3>
-            <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}>Категория: <select value={delayCategory} onChange={e => setDelayCategory(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>{DELAY_CATEGORIES.map(cat => (<option key={cat} value={cat}>{cat}</option>))}</select></label>
-            <label style={{ display: 'block', marginBottom: '16px', fontSize: '13px' }}>Причина: <textarea value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={3} style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }} /></label>
-            <button onClick={handleConfirmDelay} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#d32f2f', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px' }}>Заблокировать</button>
-            <button onClick={() => setShowDelayModal(false)} style={{ width: '100%', padding: '8px', background: '#ccc', border: 'none', borderRadius: '6px' }}>Отмена</button>
+        <div className="backdrop">
+          <div className="bottom-sheet">
+            <h3 style={{ margin: '0 0 16px 0', color: 'var(--danger)' }}>⛔ Блокировка ремонта</h3>
+            <label className="stat-label">Категория</label>
+            <select className="select-field" value={delayCategory} onChange={e => setDelayCategory(e.target.value)}>
+              {DELAY_CATEGORIES.map(cat => <option key={cat}>{cat}</option>)}
+            </select>
+            <label className="stat-label" style={{marginTop: '12px', display:'block'}}>Причина</label>
+            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={3} />
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px' }}>
+              <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
+              <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay}>Заблокировать</button>
+            </div>
           </div>
         </div>
       )}
