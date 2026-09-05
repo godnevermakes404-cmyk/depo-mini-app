@@ -15,28 +15,38 @@ const STATUSES = [
 
 const DELAY_CATEGORIES = ['Materials', 'Customer', 'Railway', 'Internal', 'Technical', 'External'];
 
+const SLA_HOURS: Record<string, number> = {
+  'ТОР': 24,
+  'ДР': 72,
+  'КР': 120,
+  'КРП': 144,
+  'Модернизация': 168
+};
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<'dashboard' | 'add_wagon'>('dashboard');
   
-  // Выбранный ремонт и связанные логи
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [activeDelay, setActiveDelay] = useState<any>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<any[]>([]);
   
-  // Поля формы вагона
+  // Поля регистрации
   const [wagonNumber, setWagonNumber] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [ownerType, setOwnerType] = useState('Own');
   const [repairType, setRepairType] = useState('ДР');
   const [loading, setLoading] = useState(false);
 
-  // Поля формы задержки
+  // Поля задержки и документов
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayCause, setDelayCause] = useState('');
+  const [docType, setDocType] = useState('VU-23');
+  const [docNumber, setDocNumber] = useState('');
 
-  // Статистика и списки
+  // Список ремонтов и статистика
   const [repairs, setRepairs] = useState<any[]>([]);
   const [stats, setStats] = useState({ onSite: 0, inRepair: 0, inQueue: 0, blocked: 0 });
 
@@ -62,6 +72,7 @@ export default function App() {
         current_status,
         repair_type,
         created_at,
+        sla_deadline,
         wagons (
           wagon_number,
           wagon_type,
@@ -81,11 +92,9 @@ export default function App() {
     }
   }
 
-  // Загрузка деталей вагона, истории и задержек
   async function openCaseDetails(item: any) {
     setSelectedCase(item);
     
-    // 1. Загружаем активную задержку, если ремонт заблокирован
     if (item.current_status === '08 REPAIR_PAUSED') {
       const { data: delay } = await supabase
         .from('delay_log')
@@ -99,7 +108,6 @@ export default function App() {
       setActiveDelay(null);
     }
 
-    // 2. Загружаем историю смены статусов
     const { data: events } = await supabase
       .from('status_events')
       .select('*')
@@ -107,6 +115,14 @@ export default function App() {
       .order('recorded_datetime', { ascending: false });
 
     if (events) setStatusHistory(events);
+
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('repair_id', item.repair_id)
+      .order('created_at', { ascending: false });
+
+    if (docs) setDocuments(docs);
   }
 
   async function handleCreateRepair() {
@@ -137,9 +153,18 @@ export default function App() {
         wagonId = newWagon.id;
       }
 
+      // Расчет SLA дедлайна
+      const hours = SLA_HOURS[repairType] || 72;
+      const slaDeadline = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+
       const { data: repairCase, error: repairError } = await supabase
         .from('repair_cases')
-        .insert([{ wagon_id: wagonId, repair_type: repairType, current_status: '01 PLANNED' }])
+        .insert([{ 
+          wagon_id: wagonId, 
+          repair_type: repairType, 
+          current_status: '01 PLANNED',
+          sla_deadline: slaDeadline
+        }])
         .select()
         .single();
 
@@ -163,7 +188,33 @@ export default function App() {
     }
   }
 
-  // Блокировка ремонта (08 REPAIR_PAUSED)
+  async function handleAddDocument() {
+    if (!docNumber.trim() || !selectedCase) {
+      alert('Введите номер документа');
+      return;
+    }
+    setLoading(true);
+
+    try {
+      const { error } = await supabase.from('documents').insert([{
+        repair_id: selectedCase.repair_id,
+        doc_type: docType,
+        doc_number: docNumber,
+        doc_date: new Date().toISOString().split('T')[0]
+      }]);
+
+      if (error) throw error;
+
+      alert(`Документ ${docType} №${docNumber} прикреплен!`);
+      setDocNumber('');
+      openCaseDetails(selectedCase);
+    } catch (err: any) {
+      alert('Ошибка прибавлении документа: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function handleConfirmDelay() {
     if (!delayCause.trim()) {
       alert('Укажите причину остановки ремонта');
@@ -205,7 +256,6 @@ export default function App() {
     }
   }
 
-  // Возобновление ремонта (снятие задержки)
   async function handleUnblockRepair() {
     if (!selectedCase) return;
     setLoading(true);
@@ -213,14 +263,12 @@ export default function App() {
     try {
       const now = new Date().toISOString();
 
-      // 1. Закрываем текущую запись в delay_log
       await supabase
         .from('delay_log')
         .update({ end_datetime: now })
         .eq('repair_id', selectedCase.repair_id)
         .is('end_datetime', null);
 
-      // 2. Вносим событие возобновления ремонта
       await supabase.from('status_events').insert([{
         repair_id: selectedCase.repair_id,
         previous_status: '08 REPAIR_PAUSED',
@@ -228,7 +276,6 @@ export default function App() {
         comment: 'Задержка устранена. Ремонт возобновлен.'
       }]);
 
-      // 3. Возвращаем статус 07 IN_REPAIR
       const { error } = await supabase
         .from('repair_cases')
         .update({ current_status: '07 IN_REPAIR', updated_at: now })
@@ -246,7 +293,6 @@ export default function App() {
     }
   }
 
-  // Обычная смена статуса
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
 
@@ -279,6 +325,15 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function getSlaBadge(deadline: string) {
+    if (!deadline) return null;
+    const diffHours = (new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60);
+    if (diffHours < 0) {
+      return <span style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: '11px' }}>⚠️ Просрочен (SLA)</span>;
+    }
+    return <span style={{ color: '#2e7d32', fontSize: '11px' }}>⏱ Осталось: {Math.round(diffHours)} ч</span>;
   }
 
   return (
@@ -362,9 +417,9 @@ export default function App() {
                       {item.current_status}
                     </span>
                   </div>
-                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#666', display: 'flex', gap: '12px' }}>
-                    <span>Тип: <b>{item.repair_type}</b></span>
-                    <span>Род: <b>{item.wagons?.wagon_type}</b></span>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Тип: <b>{item.repair_type}</b> ({item.wagons?.wagon_type})</span>
+                    {getSlaBadge(item.sla_deadline)}
                   </div>
                 </div>
               ))
@@ -372,7 +427,6 @@ export default function App() {
           </div>
         </>
       ) : (
-        /* Форма добавления */
         <div style={{ background: '#f9f9f9', padding: '16px', borderRadius: '8px' }}>
           <h3 style={{ marginTop: 0 }}>Регистрация вагона</h3>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
@@ -405,11 +459,11 @@ export default function App() {
           <label style={{ display: 'block', marginBottom: '16px', fontSize: '14px' }}>
             Вид ремонта:
             <select value={repairType} onChange={e => setRepairType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-              <option value="ТОР">ТОР</option>
-              <option value="ДР">ДР</option>
-              <option value="КР">КР</option>
-              <option value="КРП">КРП</option>
-              <option value="Модернизация">Модернизация</option>
+              <option value="ТОР">ТОР (24 ч)</option>
+              <option value="ДР">ДР (72 ч)</option>
+              <option value="КР">КР (120 ч)</option>
+              <option value="КРП">КРП (144 ч)</option>
+              <option value="Модернизация">Модернизация (168 ч)</option>
             </select>
           </label>
           <button onClick={handleCreateRepair} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px' }}>
@@ -421,7 +475,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Окно детальной карточки вагона */}
+      {/* Модальное окно деталей */}
       {selectedCase && !showDelayModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -433,7 +487,6 @@ export default function App() {
               Repair ID: {selectedCase.repair_id}
             </p>
 
-            {/* Карточка текущей задержки */}
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
               <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
                 <div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '13px', marginBottom: '4px' }}>
@@ -479,6 +532,34 @@ export default function App() {
               ))}
             </div>
 
+            {/* Документы ВУ */}
+            <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (ВУ-23, ВУ-36):</h4>
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+              <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
+                <option value="VU-23">ВУ-23М</option>
+                <option value="VU-22">ВУ-22</option>
+                <option value="VU-36">ВУ-36М</option>
+              </select>
+              <input 
+                type="text" 
+                placeholder="№ документа" 
+                value={docNumber} 
+                onChange={e => setDocNumber(e.target.value)}
+                style={{ flex: 1, padding: '6px', fontSize: '12px' }}
+              />
+              <button onClick={handleAddDocument} style={{ padding: '6px 12px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px' }}>
+                + Add
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '16px' }}>
+              {documents.map((d: any) => (
+                <div key={d.id} style={{ background: '#e8f5e9', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span><b>{d.doc_type}</b> № {d.doc_number}</span>
+                  <span style={{ color: '#666' }}>{d.doc_date}</span>
+                </div>
+              ))}
+            </div>
+
             {/* История статусов */}
             <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>История изменений (Status Events):</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
@@ -501,7 +582,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Окно фиксации задержки */}
+      {/* Окно задержки */}
       {showDelayModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
