@@ -7,6 +7,16 @@ declare global { interface Window { Telegram: any; } }
 
 const STATUSES = ['01 PLANNED', '02 ARRIVED', '04 QUEUE', '07 IN_REPAIR', '08 REPAIR_PAUSED', '12 REPAIR_DONE', '15 DEPARTED'];
 const DELAY_CATEGORIES = ['Materials', 'Customer', 'Railway', 'Internal', 'Technical', 'External'];
+const DOCUMENT_TYPES = [
+  'Справка 2612',
+  'Справка 2602',
+  'Акт осмотра',
+  'ВУ-23М',
+  'ВУ-22',
+  'ВУ-36М',
+  'Паспорт вагона'
+];
+
 const SLA_HOURS: Record<string, number> = { 'ТОР': 24, 'ДР': 72, 'КР': 120, 'КРП': 144, 'Модернизация': 168 };
 const SHOPS = [
   { id: 'telezhka', name: '🛠️ Тележечный цех' },
@@ -42,7 +52,7 @@ export default function App() {
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayCause, setDelayCause] = useState('');
-  const [docType, setDocType] = useState('Справка 2612');
+  const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
   const [docNumber, setDocNumber] = useState('');
 
   const [repairs, setRepairs] = useState<any[]>([]);
@@ -393,11 +403,17 @@ export default function App() {
                 </div>
               )}
               <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <select className="select-field" style={{ margin: 0, flex: 1 }} value={docType} onChange={e => setDocType(e.target.value)}><option>Справка 2612</option><option>Акт осмотра</option></select>
+                <select className="select-field" style={{ margin: 0, flex: 1 }} value={docType} onChange={e => setDocType(e.target.value)}>
+                  {DOCUMENT_TYPES.map(doc => (
+                    <option key={doc} value={doc}>{doc}</option>
+                  ))}
+                </select>
                 <input className="input-field" type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ margin: 0, flex: 1 }}/>
                 <button className="btn-primary" style={{ width: 'auto', padding: '0 16px' }} onClick={handleAddDocument}>+</button>
               </div>
-              {documents.map((d: any) => (<span key={d.id} style={{ background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '12px', marginRight: '6px' }}>📄 {d.doc_type} №{d.doc_number}</span>))}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                {documents.map((d: any) => (<span key={d.id} style={{ background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '12px' }}>📄 {d.doc_type} №{d.doc_number}</span>))}
+              </div>
               <textarea className="textarea-field" disabled={!canEditOps} value={inputDefects} onChange={e => setInputDefects(e.target.value)} placeholder="Входные дефекты..." rows={2} style={{ marginTop: '12px' }} />
             </div>
 
