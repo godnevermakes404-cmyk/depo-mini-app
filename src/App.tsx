@@ -25,6 +25,7 @@ const SLA_HOURS: Record<string, number> = {
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
+  const [tab, setTab] = useState<'ops' | 'analytics'>('ops');
   const [view, setView] = useState<'dashboard' | 'add_wagon'>('dashboard');
   
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -32,22 +33,22 @@ export default function App() {
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   
-  // Поля регистрации
+  // Формы
   const [wagonNumber, setWagonNumber] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [ownerType, setOwnerType] = useState('Own');
   const [repairType, setRepairType] = useState('ДР');
   const [loading, setLoading] = useState(false);
 
-  // Поля задержки и документов
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayCause, setDelayCause] = useState('');
   const [docType, setDocType] = useState('VU-23');
   const [docNumber, setDocNumber] = useState('');
 
-  // Список ремонтов и статистика
+  // Списки и статистика
   const [repairs, setRepairs] = useState<any[]>([]);
+  const [delayLogs, setDelayLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ onSite: 0, inRepair: 0, inQueue: 0, blocked: 0 });
 
   useEffect(() => {
@@ -73,6 +74,7 @@ export default function App() {
         repair_type,
         created_at,
         sla_deadline,
+        updated_at,
         wagons (
           wagon_number,
           wagon_type,
@@ -90,6 +92,14 @@ export default function App() {
         blocked: data.filter((d: any) => d.current_status === '08 REPAIR_PAUSED').length
       });
     }
+
+    // Загрузка журнала всех задержек для аналитики
+    const { data: delays } = await supabase
+      .from('delay_log')
+      .select('*')
+      .order('start_datetime', { ascending: false });
+
+    if (delays) setDelayLogs(delays);
   }
 
   async function openCaseDetails(item: any) {
@@ -153,7 +163,6 @@ export default function App() {
         wagonId = newWagon.id;
       }
 
-      // Расчет SLA дедлайна
       const hours = SLA_HOURS[repairType] || 72;
       const slaDeadline = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
@@ -182,7 +191,7 @@ export default function App() {
       setView('dashboard');
       loadData();
     } catch (err: any) {
-      alert('Ошибка при сохранении: ' + (err.message || 'Неизвестная ошибка'));
+      alert('Ошибка: ' + (err.message || 'Неизвестная ошибка'));
     } finally {
       setLoading(false);
     }
@@ -331,151 +340,245 @@ export default function App() {
     if (!deadline) return null;
     const diffHours = (new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60);
     if (diffHours < 0) {
-      return <span style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: '11px' }}>⚠️ Просрочен (SLA)</span>;
+      return <span style={{ color: '#d32f2f', fontWeight: 'bold', fontSize: '11px' }}>⚠️ Просрочен</span>;
     }
-    return <span style={{ color: '#2e7d32', fontSize: '11px' }}>⏱ Осталось: {Math.round(diffHours)} ч</span>;
+    return <span style={{ color: '#2e7d32', fontSize: '11px' }}>⏱ {Math.round(diffHours)} ч</span>;
   }
+
+  // Расчёты для Аналитики
+  const completedCases = repairs.filter((r: any) => r.current_status === '12 REPAIR_DONE' || r.current_status === '15 DEPARTED');
+  const totalCases = repairs.length || 1;
+  const onTimeCases = repairs.filter((r: any) => {
+    if (!r.sla_deadline) return true;
+    return new Date(r.sla_deadline).getTime() >= Date.now();
+  }).length;
+  
+  const slaCompliance = Math.round((onTimeCases / totalCases) * 100);
+
+  // Группировка задержек по категориям
+  const delayStats = DELAY_CATEGORIES.map(cat => ({
+    category: cat,
+    count: delayLogs.filter((d: any) => d.category === cat).length
+  }));
 
   return (
     <div style={{ padding: '16px', fontFamily: 'sans-serif', maxWidth: '480px', margin: '0 auto' }}>
-      <header style={{ borderBottom: '1px solid #ccc', paddingBottom: '12px', marginBottom: '16px' }}>
+      <header style={{ borderBottom: '1px solid #ccc', paddingBottom: '12px', marginBottom: '12px' }}>
         <h2 style={{ margin: 0, fontSize: '20px' }}>🚆 ДЕПО СЕЙЧАС</h2>
-        <p style={{ margin: '4px 0 0', color: '#666', fontSize: '13px' }}>
+        <p style={{ margin: '4px 0 8px', color: '#666', fontSize: '12px' }}>
           Пользователь: <b>{user ? `${user.first_name}` : 'Тестовый режим'}</b>
         </p>
+
+        {/* Переключатель вкладок */}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            onClick={() => setTab('ops')}
+            style={{
+              flex: 1, padding: '8px', border: 'none', borderRadius: '6px',
+              background: tab === 'ops' ? '#0088cc' : '#f0f0f0',
+              color: tab === 'ops' ? '#fff' : '#333',
+              fontWeight: 'bold', fontSize: '13px', cursor: 'pointer'
+            }}
+          >
+            📋 Операции
+          </button>
+          <button 
+            onClick={() => setTab('analytics')}
+            style={{
+              flex: 1, padding: '8px', border: 'none', borderRadius: '6px',
+              background: tab === 'analytics' ? '#0088cc' : '#f0f0f0',
+              color: tab === 'analytics' ? '#fff' : '#333',
+              fontWeight: 'bold', fontSize: '13px', cursor: 'pointer'
+            }}
+          >
+            📊 Аналитика
+          </button>
+        </div>
       </header>
 
-      {view === 'dashboard' ? (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
-            <div style={{ background: '#f0f4f8', padding: '10px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#555' }}>Всего ремонтов</div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold' }}>{stats.onSite}</div>
+      {tab === 'ops' ? (
+        /* ВКЛАДКА ОПЕРАТИВНОГО УЧЕТА */
+        view === 'dashboard' ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+              <div style={{ background: '#f0f4f8', padding: '10px', borderRadius: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#555' }}>Всего ремонтов</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold' }}>{stats.onSite}</div>
+              </div>
+              <div style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#555' }}>В ремонте</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1976d2' }}>{stats.inRepair}</div>
+              </div>
+              <div style={{ background: '#fff3e0', padding: '10px', borderRadius: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#555' }}>В очереди</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ed6c02' }}>{stats.inQueue}</div>
+              </div>
+              <div style={{ background: '#ffebee', padding: '10px', borderRadius: '8px' }}>
+                <div style={{ fontSize: '11px', color: '#555' }}>Заблокировано</div>
+                <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{stats.blocked}</div>
+              </div>
             </div>
-            <div style={{ background: '#e3f2fd', padding: '10px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#555' }}>В ремонте</div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#1976d2' }}>{stats.inRepair}</div>
+
+            <button 
+              onClick={() => setView('add_wagon')}
+              style={{
+                width: '100%', padding: '12px', backgroundColor: '#0088cc', color: '#fff',
+                border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '20px'
+              }}
+            >
+              + Зарегистрировать вагон
+            </button>
+
+            <h3 style={{ margin: '0 0 10px', fontSize: '16px' }}>Реестр вагонов на территории</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {repairs.length === 0 ? (
+                <p style={{ color: '#888', fontSize: '14px' }}>Вагонов пока нет</p>
+              ) : (
+                repairs.map((item: any) => (
+                  <div 
+                    key={item.repair_id}
+                    onClick={() => openCaseDetails(item)}
+                    style={{
+                      background: item.current_status === '08 REPAIR_PAUSED' ? '#fff5f5' : '#fff',
+                      border: item.current_status === '08 REPAIR_PAUSED' ? '1px solid #ffcdd2' : '1px solid #e0e0e0',
+                      borderRadius: '8px', padding: '12px', cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 'bold', fontSize: '16px' }}>
+                        № {item.wagons?.wagon_number || 'Неизвестен'}
+                      </span>
+                      <span style={{ 
+                        fontSize: '11px', padding: '3px 8px', borderRadius: '12px', 
+                        background: item.current_status === '08 REPAIR_PAUSED' ? '#ffebee' : item.current_status === '07 IN_REPAIR' ? '#e3f2fd' : '#f5f5f5',
+                        color: item.current_status === '08 REPAIR_PAUSED' ? '#c62828' : item.current_status === '07 IN_REPAIR' ? '#1976d2' : '#333',
+                        fontWeight: 'bold'
+                      }}>
+                        {item.current_status}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Тип: <b>{item.repair_type}</b> ({item.wagons?.wagon_type})</span>
+                      {getSlaBadge(item.sla_deadline)}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-            <div style={{ background: '#fff3e0', padding: '10px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#555' }}>В очереди</div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#ed6c02' }}>{stats.inQueue}</div>
+          </>
+        ) : (
+          /* Форма добавления */
+          <div style={{ background: '#f9f9f9', padding: '16px', borderRadius: '8px' }}>
+            <h3 style={{ marginTop: 0 }}>Регистрация вагона</h3>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+              Номер вагона (8 цифр):
+              <input type="text" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="52839102" style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }} />
+            </label>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+              Род вагона:
+              <select value={wagonType} onChange={e => setWagonType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
+                <option value="Полувагон">Полувагон</option>
+                <option value="Цистерна">Цистерна</option>
+                <option value="Крытый">Крытый</option>
+                <option value="Платформа">Платформа</option>
+                <option value="Хоппер">Хоппер</option>
+              </select>
+            </label>
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
+              Собственность:
+              <select value={ownerType} onChange={e => setOwnerType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
+                <option value="Own">Собственный (Own)</option>
+                <option value="Third-party">Сторонний (Client)</option>
+              </select>
+            </label>
+            <label style={{ display: 'block', marginBottom: '16px', fontSize: '14px' }}>
+              Вид ремонта:
+              <select value={repairType} onChange={e => setRepairType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
+                <option value="ТОР">ТОР (24 ч)</option>
+                <option value="ДР">ДР (72 ч)</option>
+                <option value="КР">КР (120 ч)</option>
+                <option value="КРП">КРП (144 ч)</option>
+                <option value="Модернизация">Модернизация (168 ч)</option>
+              </select>
+            </label>
+            <button onClick={handleCreateRepair} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px' }}>
+              {loading ? 'Сохранение...' : 'Создать Repair Case'}
+            </button>
+            <button onClick={() => setView('dashboard')} style={{ width: '100%', padding: '10px', backgroundColor: '#ccc', border: 'none', borderRadius: '6px' }}>
+              Отмена
+            </button>
+          </div>
+        )
+      ) : (
+        /* ВКЛАДКА АНАЛИТИКИ (ДАШБОРД) */
+        <div>
+          <h3 style={{ marginTop: 0, fontSize: '16px' }}>📊 Аналитический дашборд</h3>
+
+          {/* Индикатор соблюдения SLA */}
+          <div style={{ background: '#f5f5f5', borderRadius: '8px', padding: '16px', marginBottom: '16px', borderLeft: '4px solid #2e7d32' }}>
+            <div style={{ fontSize: '12px', color: '#666' }}>Соблюдение SLA (В рамках нормативного срока)</div>
+            <div style={{ fontSize: '28px', fontWeight: 'bold', color: slaCompliance >= 80 ? '#2e7d32' : '#d32f2f', margin: '4px 0' }}>
+              {slaCompliance}%
             </div>
-            <div style={{ background: '#ffebee', padding: '10px', borderRadius: '8px' }}>
-              <div style={{ fontSize: '11px', color: '#555' }}>Заблокировано</div>
-              <div style={{ fontSize: '20px', fontWeight: 'bold', color: '#d32f2f' }}>{stats.blocked}</div>
+            <div style={{ background: '#e0e0e0', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ width: `${slaCompliance}%`, background: slaCompliance >= 80 ? '#4caf50' : '#f44336', height: '100%' }} />
             </div>
           </div>
 
-          <button 
-            onClick={() => setView('add_wagon')}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: '#0088cc',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              fontSize: '15px',
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              marginBottom: '20px'
-            }}
-          >
-            + Зарегистрировать вагон
-          </button>
+          {/* Сводка выпусков */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
+            <div style={{ background: '#e8f5e9', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#555' }}>Завершенные ремонты</div>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#2e7d32' }}>{completedCases.length}</div>
+            </div>
+            <div style={{ background: '#ffebee', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#555' }}>Всего событий задержек</div>
+              <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#c62828' }}>{delayLogs.length}</div>
+            </div>
+          </div>
 
-          <h3 style={{ margin: '0 0 10px', fontSize: '16px' }}>Реестр вагонов на территории</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {repairs.length === 0 ? (
-              <p style={{ color: '#888', fontSize: '14px' }}>Вагонов пока нет</p>
+          {/* Анализ задержек по категориям */}
+          <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>Причины задержек (Delay Log)</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {delayStats.map(stat => (
+                <div key={stat.category}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '2px' }}>
+                    <span><b>{stat.category}</b></span>
+                    <span>{stat.count} случаев</span>
+                  </div>
+                  <div style={{ background: '#f0f0f0', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ 
+                      width: delayLogs.length > 0 ? `${(stat.count / delayLogs.length) * 100}%` : '0%', 
+                      background: '#d32f2f', height: '100%' 
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Последние зафиксированные задержки */}
+          <h4 style={{ margin: '0 0 8px', fontSize: '14px' }}>Журнал последних задержек</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {delayLogs.length === 0 ? (
+              <p style={{ color: '#888', fontSize: '13px' }}>Задержек не зафиксировано</p>
             ) : (
-              repairs.map((item: any) => (
-                <div 
-                  key={item.repair_id}
-                  onClick={() => openCaseDetails(item)}
-                  style={{
-                    background: item.current_status === '08 REPAIR_PAUSED' ? '#fff5f5' : '#fff',
-                    border: item.current_status === '08 REPAIR_PAUSED' ? '1px solid #ffcdd2' : '1px solid #e0e0e0',
-                    borderRadius: '8px',
-                    padding: '12px',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 'bold', fontSize: '16px' }}>
-                      № {item.wagons?.wagon_number || 'Неизвестен'}
-                    </span>
-                    <span style={{ 
-                      fontSize: '11px', 
-                      padding: '3px 8px', 
-                      borderRadius: '12px', 
-                      background: item.current_status === '08 REPAIR_PAUSED' ? '#ffebee' : item.current_status === '07 IN_REPAIR' ? '#e3f2fd' : '#f5f5f5',
-                      color: item.current_status === '08 REPAIR_PAUSED' ? '#c62828' : item.current_status === '07 IN_REPAIR' ? '#1976d2' : '#333',
-                      fontWeight: 'bold'
-                    }}>
-                      {item.current_status}
-                    </span>
+              delayLogs.slice(0, 5).map((d: any) => (
+                <div key={d.id} style={{ background: '#f9f9f9', borderLeft: '3px solid #d32f2f', padding: '8px', borderRadius: '4px', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Категория: <b>{d.category}</b></span>
+                    <span style={{ color: '#888', fontSize: '10px' }}>{new Date(d.start_datetime).toLocaleDateString()}</span>
                   </div>
-                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Тип: <b>{item.repair_type}</b> ({item.wagons?.wagon_type})</span>
-                    {getSlaBadge(item.sla_deadline)}
-                  </div>
+                  <div style={{ marginTop: '2px', color: '#444' }}>Причина: {d.cause}</div>
                 </div>
               ))
             )}
           </div>
-        </>
-      ) : (
-        <div style={{ background: '#f9f9f9', padding: '16px', borderRadius: '8px' }}>
-          <h3 style={{ marginTop: 0 }}>Регистрация вагона</h3>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Номер вагона (8 цифр):
-            <input 
-              type="text" 
-              value={wagonNumber} 
-              onChange={e => setWagonNumber(e.target.value)}
-              placeholder="52839102"
-              style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }}
-            />
-          </label>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Род вагона:
-            <select value={wagonType} onChange={e => setWagonType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-              <option value="Полувагон">Полувагон</option>
-              <option value="Цистерна">Цистерна</option>
-              <option value="Крытый">Крытый</option>
-              <option value="Платформа">Платформа</option>
-              <option value="Хоппер">Хоппер</option>
-            </select>
-          </label>
-          <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
-            Собственность:
-            <select value={ownerType} onChange={e => setOwnerType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-              <option value="Own">Собственный (Own)</option>
-              <option value="Third-party">Сторонний (Client)</option>
-            </select>
-          </label>
-          <label style={{ display: 'block', marginBottom: '16px', fontSize: '14px' }}>
-            Вид ремонта:
-            <select value={repairType} onChange={e => setRepairType(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
-              <option value="ТОР">ТОР (24 ч)</option>
-              <option value="ДР">ДР (72 ч)</option>
-              <option value="КР">КР (120 ч)</option>
-              <option value="КРП">КРП (144 ч)</option>
-              <option value="Модернизация">Модернизация (168 ч)</option>
-            </select>
-          </label>
-          <button onClick={handleCreateRepair} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#4caf50', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px' }}>
-            {loading ? 'Сохранение...' : 'Создать Repair Case'}
-          </button>
-          <button onClick={() => setView('dashboard')} style={{ width: '100%', padding: '10px', backgroundColor: '#ccc', border: 'none', borderRadius: '6px' }}>
-            Отмена
-          </button>
         </div>
       )}
 
-      {/* Модальное окно деталей */}
+      {/* Модальное окно деталей вагона */}
       {selectedCase && !showDelayModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -516,14 +619,11 @@ export default function App() {
                   disabled={st === selectedCase.current_status || loading}
                   onClick={() => handleUpdateStatus(st)}
                   style={{
-                    padding: '8px 12px',
-                    textAlign: 'left',
+                    padding: '8px 12px', textAlign: 'left',
                     background: st === '08 REPAIR_PAUSED' ? '#ffebee' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5',
                     border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
                     color: st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
+                    borderRadius: '6px', cursor: 'pointer', fontSize: '13px',
                     fontWeight: st === '08 REPAIR_PAUSED' ? 'bold' : 'normal'
                   }}
                 >
@@ -532,7 +632,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Документы ВУ */}
             <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (ВУ-23, ВУ-36):</h4>
             <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
               <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
@@ -540,13 +639,7 @@ export default function App() {
                 <option value="VU-22">ВУ-22</option>
                 <option value="VU-36">ВУ-36М</option>
               </select>
-              <input 
-                type="text" 
-                placeholder="№ документа" 
-                value={docNumber} 
-                onChange={e => setDocNumber(e.target.value)}
-                style={{ flex: 1, padding: '6px', fontSize: '12px' }}
-              />
+              <input type="text" placeholder="№ документа" value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }} />
               <button onClick={handleAddDocument} style={{ padding: '6px 12px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px' }}>
                 + Add
               </button>
@@ -560,7 +653,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* История статусов */}
             <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>История изменений (Status Events):</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
               {statusHistory.map((ev: any) => (
@@ -572,17 +664,14 @@ export default function App() {
               ))}
             </div>
 
-            <button 
-              onClick={() => setSelectedCase(null)}
-              style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px' }}
-            >
+            <button onClick={() => setSelectedCase(null)} style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px' }}>
               Закрыть
             </button>
           </div>
         </div>
       )}
 
-      {/* Окно задержки */}
+      {/* Модальное окно задержки */}
       {showDelayModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
@@ -596,11 +685,7 @@ export default function App() {
 
             <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}>
               Категория задержки:
-              <select 
-                value={delayCategory} 
-                onChange={e => setDelayCategory(e.target.value)}
-                style={{ width: '100%', padding: '8px', marginTop: '4px' }}
-              >
+              <select value={delayCategory} onChange={e => setDelayCategory(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
                 {DELAY_CATEGORIES.map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
@@ -609,37 +694,14 @@ export default function App() {
 
             <label style={{ display: 'block', marginBottom: '16px', fontSize: '13px' }}>
               Причина остановки ремонта:
-              <textarea 
-                value={delayCause}
-                onChange={e => setDelayCause(e.target.value)}
-                placeholder="Например: Ожидание поставки боковых рам"
-                rows={3}
-                style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }}
-              />
+              <textarea value={delayCause} onChange={e => setDelayCause(e.target.value)} placeholder="Например: Ожидание поставки боковых рам" rows={3} style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }} />
             </label>
 
-            <button 
-              onClick={handleConfirmDelay}
-              disabled={loading}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#d32f2f',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: 'bold',
-                marginBottom: '8px',
-                cursor: 'pointer'
-              }}
-            >
+            <button onClick={handleConfirmDelay} disabled={loading} style={{ width: '100%', padding: '12px', backgroundColor: '#d32f2f', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', marginBottom: '8px', cursor: 'pointer' }}>
               {loading ? 'Сохранение...' : 'Заблокировать ремонт'}
             </button>
 
-            <button 
-              onClick={() => setShowDelayModal(false)}
-              style={{ width: '100%', padding: '8px', background: '#ccc', border: 'none', borderRadius: '6px' }}
-            >
+            <button onClick={() => setShowDelayModal(false)} style={{ width: '100%', padding: '8px', background: '#ccc', border: 'none', borderRadius: '6px' }}>
               Отмена
             </button>
           </div>
