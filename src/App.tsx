@@ -81,21 +81,28 @@ export default function App() {
     if (tgUser?.id) {
       const userName = `${tgUser.first_name} ${tgUser.last_name || ''}`.trim();
 
-      // Запрашиваем пользователя по числовому telegram_id
-      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
+      const { data: dbUser, error: fetchError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('telegram_id', tgUser.id)
+        .maybeSingle();
+
+      if (fetchError) {
+        alert("Ошибка поиска пользователя: " + fetchError.message);
+      }
 
       if (dbUser) {
         setUser({ name: dbUser.name || userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       } else {
-        // ИСПРАВЛЕНИЕ: Используем правильные названия колонок 'name' и передаем 'telegram_id' как число
-        const { data: newUser, error } = await supabase.from('users').insert([{ 
+        const { data: newUser, error: insertError } = await supabase.from('users').insert([{ 
           telegram_id: tgUser.id, 
           name: userName, 
           role: 'Dispatcher' 
         }]).select().maybeSingle();
 
-        if (error) {
-          console.error("Ошибка создания пользователя:", error);
+        if (insertError) {
+          // ТЕПЕРЬ ОШИБКА ПОЯВИТСЯ НА ЭКРАНЕ В ТЕЛЕГРАМЕ
+          alert("Ошибка БД при регистрации пользователя: " + insertError.message);
         }
 
         setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
@@ -106,7 +113,7 @@ export default function App() {
 
     loadData();
   }
-
+  
   async function loadData() {
     const { data, error } = await supabase
       .from('repair_cases')
