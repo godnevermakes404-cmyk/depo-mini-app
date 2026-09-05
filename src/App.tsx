@@ -56,7 +56,6 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<any[]>([]);
   const [stats, setStats] = useState({ onSite: 0, inRepair: 0, inQueue: 0, blocked: 0 });
 
-  // Функция для вибрации кнопок
   const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     try {
       if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -76,7 +75,7 @@ export default function App() {
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
         tg.ready();
-        tg.expand(); // Разворачиваем аппку на весь экран
+        tg.expand();
         if (tg.initDataUnsafe && tg.initDataUnsafe.user) {
           tgUser = tg.initDataUnsafe.user;
           userName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || userName;
@@ -264,7 +263,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Шапка */}
       <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
         <div>
           <h2 style={{ margin: '0 0 4px 0', fontSize: '24px', fontWeight: '800' }}>🚆 ДЕПО</h2>
@@ -272,7 +270,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Вкладки */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', background: 'var(--tg-bg)', padding: '4px', borderRadius: '14px' }}>
         <button onClick={() => {vibrate('light'); setTab('ops')}} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: tab === 'ops' ? 'var(--tg-btn)' : 'transparent', color: tab === 'ops' ? '#fff' : 'var(--tg-text)', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>📋 Операции</button>
         <button onClick={() => {vibrate('light'); setTab('analytics')}} style={{ flex: 1, padding: '10px', borderRadius: '10px', border: 'none', background: tab === 'analytics' ? 'var(--tg-btn)' : 'transparent', color: tab === 'analytics' ? '#fff' : 'var(--tg-text)', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }}>📊 Аналитика</button>
@@ -362,7 +359,7 @@ export default function App() {
         </div>
       )}
 
-      {/* НАТИВНОЕ МОДАЛЬНОЕ ОКНО (BOTTOM SHEET) */}
+      {/* ШТОРКА (BOTTOM SHEET) */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
@@ -449,6 +446,20 @@ export default function App() {
               <button className={`list-btn ${signatures.customer ? 'done' : ''}`} disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')}>
                 <span>🏢 Заказчик</span>{signatures.customer ? '✓ Подписано' : 'Нажмите для подписи'}
               </button>
+            </div>
+
+            {/* ЖУРНАЛ СОБЫТИЙ */}
+            <div className="card" style={{ background: 'var(--tg-sec-bg)', border: 'none' }}>
+              <h4 style={{ margin: '0 0 12px 0', color: 'var(--tg-hint)' }}>📜 Журнал событий</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {statusHistory.map((ev: any) => (
+                  <div key={ev.event_id || ev.recorded_datetime} style={{ background: 'var(--tg-bg)', padding: '8px 12px', borderRadius: '8px', fontSize: '12px' }}>
+                    <div style={{ fontWeight: 'bold' }}>{ev.new_status}</div>
+                    <div style={{ color: 'var(--tg-hint)', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
+                    {ev.comment && <div style={{ marginTop: '2px', fontStyle: 'italic', color: 'var(--tg-text)' }}>{ev.comment}</div>}
+                  </div>
+                ))}
+              </div>
             </div>
 
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
