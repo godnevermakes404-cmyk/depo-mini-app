@@ -1,148 +1,171 @@
-/* Подключаем нативные переменные Telegram с фоллбэком для обычного браузера */
 :root {
-  --tg-bg: var(--tg-theme-bg-color, #ffffff);
-  --tg-sec-bg: var(--tg-theme-secondary-bg-color, #f4f4f5);
-  --tg-text: var(--tg-theme-text-color, #000000);
-  --tg-hint: var(--tg-theme-hint-color, #888888);
-  --tg-btn: var(--tg-theme-button-color, #3390ec);
-  --tg-btn-text: var(--tg-theme-button-text-color, #ffffff);
-  
-  --danger: #ef4444;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --accent: #0088cc;
+  /* Premium App Colors */
+  --brand-color: #007aff; /* Глубокий синий (Apple style) */
+  --bg-color: #f2f2f7;
+  --card-bg: #ffffff;
+  --text-main: #000000;
+  --text-muted: #8e8e93;
+  --border-light: rgba(60, 60, 67, 0.1);
+  --danger: #ff3b30;
+  --success: #34c759;
+  --warning: #ff9500;
+}
+
+/* Автоматическая темная тема Telegram */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-color: #000000;
+    --card-bg: #1c1c1e;
+    --text-main: #ffffff;
+    --border-light: rgba(255, 255, 255, 0.1);
+  }
 }
 
 body {
-  background-color: var(--tg-sec-bg);
-  color: var(--tg-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-main);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
   margin: 0;
   padding: 0;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Макет */
-.app-container {
+/* Шапка приложения */
+.brand-header {
+  background: var(--card-bg);
+  padding: 16px 20px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 0 var(--border-light);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.brand-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0;
+  color: var(--text-main);
+}
+
+/* Контейнер контента (учитывает нижнее меню) */
+.content-area {
   padding: 16px;
+  padding-bottom: 90px; /* Отступ для нижнего меню */
   max-width: 500px;
   margin: 0 auto;
-  padding-bottom: 40px;
+}
+
+/* Нижнее навигационное меню */
+.bottom-nav {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: var(--card-bg);
+  box-shadow: 0 -2px 15px rgba(0,0,0,0.05);
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 500;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 25%;
+  height: 100%;
+  transition: 0.2s;
+  border: none;
+  background: transparent;
+}
+
+.nav-item.active {
+  color: var(--brand-color);
+}
+
+.nav-icon {
+  font-size: 22px;
+  margin-bottom: 4px;
+  transition: transform 0.2s;
+}
+
+.nav-item.active .nav-icon {
+  transform: scale(1.15);
 }
 
 /* Карточки */
-.card {
-  background-color: var(--tg-bg);
-  border-radius: 16px;
-  padding: 16px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  margin-bottom: 12px;
-  border: 1px solid rgba(128, 128, 128, 0.1);
-  transition: transform 0.1s ease;
-}
-.card:active {
-  transform: scale(0.98);
-}
-
-/* Дашборд статы */
-.stats-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-.stat-box {
-  background: var(--tg-bg);
-  border-radius: 16px;
+.premium-card {
+  background: var(--card-bg);
+  border-radius: 20px;
   padding: 16px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  border: 1px solid rgba(128, 128, 128, 0.08);
+  margin-bottom: 12px;
+  border: 1px solid var(--border-light);
+  transition: transform 0.1s ease;
 }
-.stat-box.highlight { background: linear-gradient(135deg, #e3f2fd, #bbdefb); border: none; }
-.stat-box.danger { background: linear-gradient(135deg, #ffebee, #ffcdd2); border: none; }
-.stat-value { font-size: 28px; font-weight: 800; margin-top: 4px; color: var(--tg-text); }
-.stat-label { font-size: 12px; color: var(--tg-hint); font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+.premium-card:active { transform: scale(0.98); }
+
+/* Дашборд статы */
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+.stat-box { background: var(--card-bg); border-radius: 16px; padding: 16px; border: 1px solid var(--border-light); display: flex; flex-direction: column; }
+.stat-value { font-size: 32px; font-weight: 800; margin-top: 4px; color: var(--text-main); }
+.stat-label { font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
 
 /* Кнопки */
-.btn-primary {
-  width: 100%;
-  background-color: var(--tg-btn);
-  color: var(--tg-btn-text);
+.btn-primary { width: 100%; background-color: var(--brand-color); color: #fff; border: none; border-radius: 14px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 14px rgba(0, 122, 255, 0.3); transition: all 0.2s; }
+.btn-primary:active { transform: scale(0.96); box-shadow: 0 2px 8px rgba(0, 122, 255, 0.2); }
+.btn-secondary { width: 100%; background-color: var(--bg-color); color: var(--brand-color); border: none; border-radius: 14px; padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer; }
+
+/* Плавающая кнопка действия (FAB) */
+.fab {
+  position: fixed;
+  bottom: 84px;
+  right: 20px;
+  background: var(--brand-color);
+  color: white;
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  box-shadow: 0 4px 15px rgba(0, 122, 255, 0.4);
   border: none;
-  border-radius: 12px;
-  padding: 14px;
-  font-size: 16px;
-  font-weight: 600;
+  z-index: 400;
   cursor: pointer;
-  box-shadow: 0 4px 14px rgba(51, 144, 236, 0.3);
-  transition: all 0.2s;
+  transition: transform 0.2s;
 }
-.btn-primary:active { transform: scale(0.96); box-shadow: 0 2px 8px rgba(51, 144, 236, 0.2); }
-.btn-secondary {
-  width: 100%; background-color: var(--tg-sec-bg); color: var(--tg-btn);
-  border: none; border-radius: 12px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer;
-}
+.fab:active { transform: scale(0.9); }
 
-/* Поля ввода (Apple style) */
-.input-field, .select-field, .textarea-field {
-  width: 100%;
-  background-color: var(--tg-sec-bg);
-  color: var(--tg-text);
-  border: 1px solid rgba(128, 128, 128, 0.2);
+/* Статусные таблетки */
+.status-pill {
+  padding: 4px 10px;
   border-radius: 12px;
-  padding: 12px 14px;
-  font-size: 15px;
-  box-sizing: border-box;
-  margin-top: 6px;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.input-field:focus, .textarea-field:focus { border-color: var(--tg-btn); }
-
-/* Модальное окно (Шторка / Bottom Sheet) */
-.backdrop {
-  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
-  z-index: 1000;
-  animation: fadeIn 0.2s ease-out;
-  display: flex; flex-direction: column; justify-content: flex-end;
-}
-.bottom-sheet {
-  background: var(--tg-bg);
-  border-radius: 24px 24px 0 0;
-  padding: 24px 20px;
-  width: 100%;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-sizing: border-box;
-  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
-  animation: slideUp 0.3s cubic-bezier(0.1, 0.9, 0.2, 1);
-}
-.sheet-handle {
-  width: 40px; height: 5px; background: rgba(128, 128, 128, 0.3);
-  border-radius: 3px; margin: 0 auto 20px auto;
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--bg-color);
+  color: var(--text-main);
 }
 
-/* Чек-листы и списки */
-.list-btn {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 12px 16px; background: var(--tg-sec-bg);
-  border: 1px solid rgba(128,128,128,0.1); border-radius: 12px;
-  font-size: 14px; font-weight: 500; cursor: pointer; color: var(--tg-text);
-  transition: all 0.2s; margin-bottom: 8px;
-}
-.list-btn.done { background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.3); color: var(--success); }
-.list-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Формы */
+.input-field, .select-field, .textarea-field { width: 100%; background-color: var(--bg-color); color: var(--text-main); border: 1px solid var(--border-light); border-radius: 12px; padding: 12px 14px; font-size: 15px; box-sizing: border-box; margin-top: 6px; outline: none; }
 
-/* Анимации */
+/* Шторка (Модалка) */
+.backdrop { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(5px); z-index: 1000; animation: fadeIn 0.2s ease-out; display: flex; flex-direction: column; justify-content: flex-end; }
+.bottom-sheet { background: var(--card-bg); border-radius: 24px 24px 0 0; padding: 24px 20px; width: 100%; max-height: 90vh; overflow-y: auto; box-sizing: border-box; animation: slideUp 0.3s cubic-bezier(0.1, 0.9, 0.2, 1); }
+.sheet-handle { width: 40px; height: 5px; background: var(--border-light); border-radius: 3px; margin: 0 auto 20px auto; }
+.list-btn { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; background: var(--bg-color); border: 1px solid var(--border-light); border-radius: 14px; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text-main); margin-bottom: 8px; }
+.list-btn.done { background: rgba(52, 199, 89, 0.1); border-color: rgba(52, 199, 89, 0.3); color: var(--success); }
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-
-/* Скроллбар */
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.3); border-radius: 10px; }
