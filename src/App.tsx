@@ -47,7 +47,6 @@ export default function App() {
   const [shopProgress, setShopProgress] = useState<Record<string, boolean>>({ telezhka: false, kolesa: false, malyarka: false, sborka: false });
   const [signatures, setSignatures] = useState<Record<string, boolean>>({ master: false, inspector: false, customer: false });
   
-  // Новые стейты для дефектов и материалов
   const [inputDefects, setInputDefects] = useState('');
   const [materialUsage, setMaterialUsage] = useState('');
 
@@ -220,7 +219,7 @@ export default function App() {
       await supabase.from('repair_cases')
         .update({ input_defects: inputDefects, material_usage: materialUsage })
         .eq('repair_id', selectedCase.repair_id);
-      alert('Технические данные (дефекты и материалы) сохранены!');
+      alert('Данные о дефектах и материалах сохранены!');
       loadData();
     } catch(err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
   }
@@ -319,7 +318,6 @@ export default function App() {
   const delayStats = DELAY_CATEGORIES.map(cat => ({ category: cat, count: delayLogs.filter((d: any) => d.category === cat).length }));
   const isFullySigned = signatures.master && signatures.inspector && signatures.customer;
 
-  // Группировка выпуска за текущий месяц (Для отчета)
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
   const monthlyReleases = completedCases.filter((c: any) => {
@@ -412,7 +410,6 @@ export default function App() {
             <div style={{ background: '#ffebee', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Всего задержек</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#c62828' }}>{delayLogs.length}</div></div>
           </div>
           
-          {/* СВОДНЫЙ ОТЧЕТ О ВЫПУСКЕ */}
           <div style={{ background: '#fff', border: '1px solid #1976d2', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
             <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#1976d2' }}>📋 Выпуск вагонов за текущий месяц</h4>
             {Object.keys(releaseGroups).length === 0 ? (
@@ -455,93 +452,174 @@ export default function App() {
         </div>
       )}
 
+      {/* МОДАЛЬНОЕ ОКНО ВАГОНА В НОВОЙ ЛОГИЧЕСКОЙ ПОСЛЕДОВАТЕЛЬНОСТИ */}
       {selectedCase && !showDelayModal && (
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '380px', maxHeight: '90vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 4px' }}>Вагон № {selectedCase.wagons?.wagon_number}</h3><p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>Repair ID: {selectedCase.repair_id}</p>
+            <h3 style={{ margin: '0 0 4px' }}>Вагон № {selectedCase.wagons?.wagon_number}</h3>
+            <p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>Repair ID: {selectedCase.repair_id}</p>
 
-            {/* ДЕФЕКТЫ И МАТЕРИАЛЫ */}
-            <div style={{ background: '#fff8e1', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #ffe082' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#f57f17' }}>🛠️ Тех. состояние и материалы:</h4>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
-                Входные дефекты (по Акту осмотра):
-                <textarea disabled={!canEditOps} value={inputDefects} onChange={e => setInputDefects(e.target.value)} placeholder="Например: Излом досок пола 0.6м3..." rows={2} style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px' }} />
-              </label>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
-                Учёт материалов и резок (Цех 24):
-                <textarea disabled={!canEditOps} value={materialUsage} onChange={e => setMaterialUsage(e.target.value)} placeholder="Например: 1.25м х 0.90м = 10 шт. Лист на пол..." rows={2} style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px' }} />
-              </label>
+            {/* ЭТАП 1: ПРИХОД, СТАУС И ПЕРВИЧНЫЕ ДОКУМЕНТЫ */}
+            <div style={{ background: '#f5f5f5', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #e0e0e0' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#333' }}>1️⃣ Приход и Входной контроль</h4>
+              
               {canEditOps && (
-                <button onClick={handleSaveTechData} disabled={loading} style={{ width: '100%', padding: '8px', background: '#fbc02d', color: '#333', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
-                  💾 Сохранить тех. данные
+                <div style={{ marginBottom: '12px' }}>
+                  <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 6px' }}>Текущий этап ремонта:</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    {STATUSES.map(st => {
+                      const isBlocked = st === '12 REPAIR_DONE' && !isFullySigned;
+                      return (
+                        <button
+                          key={st}
+                          disabled={st === selectedCase.current_status || loading || isBlocked}
+                          onClick={() => handleUpdateStatus(st)}
+                          style={{
+                            padding: '6px 10px', textAlign: 'left',
+                            background: st === '08 REPAIR_PAUSED' ? '#ffebee' : isBlocked ? '#f5f5f5' : st === selectedCase.current_status ? '#0088cc' : '#fff',
+                            border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
+                            color: st === selectedCase.current_status ? '#fff' : isBlocked ? '#aaa' : st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
+                            borderRadius: '4px', cursor: isBlocked ? 'not-allowed' : 'pointer', fontSize: '12px',
+                            fontWeight: st === selectedCase.current_status ? 'bold' : 'normal'
+                          }}
+                        >
+                          {isBlocked ? '🔒 12 REPAIR_DONE (Нужно 3 подписи)' : st === '08 REPAIR_PAUSED' ? '⛔ 08 REPAIR_PAUSED (Заблокировать)' : st}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Первичные документы */}
+              <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 6px' }}>Прикрепить документ (Справка 2612 / Акт):</p>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
+                  <option value="Справка 2612">Справка 2612</option>
+                  <option value="Акт осмотра">Акт осмотра</option>
+                  <option value="ВУ-23М">ВУ-23М</option>
+                  <option value="ВУ-22">ВУ-22</option>
+                </select>
+                <input type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }}/>
+                <button onClick={handleAddDocument} style={{ padding: '6px 10px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px' }}>+ Add</button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '10px' }}>
+                {documents.map((d: any) => (
+                  <div key={d.id} style={{ background: '#fff', padding: '4px 8px', borderRadius: '4px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', border: '1px solid #ddd' }}>
+                    <span><b>{d.doc_type}</b> № {d.doc_number}</span>
+                    <span style={{ color: '#888' }}>{d.doc_date}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Входные дефекты */}
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold' }}>
+                Входные дефекты (по Акту осмотра):
+                <textarea 
+                  disabled={!canEditOps} 
+                  value={inputDefects} 
+                  onChange={e => setInputDefects(e.target.value)} 
+                  placeholder="Например: Излом досок пола 0.6м3..." 
+                  rows={2} 
+                  style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px', fontWeight: 'normal' }} 
+                />
+              </label>
+            </div>
+
+            {/* ЭТАП 2: ВЫПОЛНЕНИЕ РЕМОНТА И МАТЕРИАЛЫ */}
+            <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #d0d7de' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#1976d2' }}>2️⃣ Прохождение ремонта и Цехи</h4>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '12px' }}>
+                {SHOPS.map(shop => {
+                  const isDone = !!shopProgress[shop.id];
+                  return (
+                    <button 
+                      key={shop.id} 
+                      disabled={!canEditOps} 
+                      onClick={() => handleToggleShop(shop.id)} 
+                      style={{ 
+                        padding: '8px', display: 'flex', justifyContent: 'space-between', 
+                        background: isDone ? '#e8f5e9' : '#fff', 
+                        border: isDone ? '1px solid #81c784' : '1px solid #ccc', 
+                        borderRadius: '6px', cursor: canEditOps ? 'pointer' : 'not-allowed', 
+                        opacity: canEditOps ? 1 : 0.7, fontSize: '12px', fontWeight: isDone ? 'bold' : 'normal' 
+                      }}
+                    >
+                      <span>{shop.name}</span>
+                      <span>{isDone ? '✅ Готово' : '⏳ В ожидании'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Расход материалов */}
+              <label style={{ display: 'block', fontSize: '12px', fontWeight: 'bold' }}>
+                Учёт материалов и резок (Цех 24):
+                <textarea 
+                  disabled={!canEditOps} 
+                  value={materialUsage} 
+                  onChange={e => setMaterialUsage(e.target.value)} 
+                  placeholder="Например: 1.25м х 0.90м = 10 шт. Лист на пол..." 
+                  rows={2} 
+                  style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px', fontWeight: 'normal' }} 
+                />
+              </label>
+
+              {canEditOps && (
+                <button onClick={handleSaveTechData} disabled={loading} style={{ width: '100%', marginTop: '8px', padding: '8px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
+                  💾 Сохранить дефекты и материалы
                 </button>
               )}
             </div>
 
-            <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #d0d7de' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#1976d2' }}>🏭 Чек-лист цехов:</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {SHOPS.map(shop => {
-                  const isDone = !!shopProgress[shop.id];
-                  return <button key={shop.id} disabled={!canEditOps} onClick={() => handleToggleShop(shop.id)} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: isDone ? '#e8f5e9' : '#fff', border: isDone ? '1px solid #81c784' : '1px solid #ccc', borderRadius: '6px', cursor: canEditOps ? 'pointer' : 'not-allowed', opacity: canEditOps ? 1 : 0.7, fontSize: '12px', fontWeight: isDone ? 'bold' : 'normal' }}><span>{shop.name}</span><span>{isDone ? '✅ Готово' : '⏳ В ожидании'}</span></button>;
-                })}
-              </div>
-            </div>
-
+            {/* ЭТАП 3: ФИНАЛЬНАЯ ПРИЁМКА ВУ-36М */}
             <div style={{ background: isFullySigned ? '#e8f5e9' : '#fff3e0', borderRadius: '8px', padding: '12px', marginBottom: '16px', border: isFullySigned ? '1px solid #81c784' : '1px solid #ffe0b2' }}>
-              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: isFullySigned ? '#2e7d32' : '#e65100' }}>✍️ Согласование ВУ-36М:</h4>
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: isFullySigned ? '#2e7d32' : '#e65100' }}>3️⃣ Финальная приёмка (Акт ВУ-36М)</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <button disabled={!canSignMaster} onClick={() => handleToggleSignature('master')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.master ? '#c8e6c9' : canSignMaster ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignMaster ? 'pointer' : 'not-allowed', opacity: canSignMaster ? 1 : 0.6 }}><span>👨‍🔧 1. Мастер цеха</span><span>{signatures.master ? '✅ Подписано' : canSignMaster ? '❌ Подписать' : '🔒 Нет прав'}</span></button>
-                <button disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.inspector ? '#c8e6c9' : canSignInspector ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignInspector ? 'pointer' : 'not-allowed', opacity: canSignInspector ? 1 : 0.6 }}><span>🕵️‍♂️ 2. Приёмщик ВК</span><span>{signatures.inspector ? '✅ Подписано' : canSignInspector ? '❌ Подписать' : '🔒 Нет прав'}</span></button>
-                <button disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.customer ? '#c8e6c9' : canSignCustomer ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignCustomer ? 'pointer' : 'not-allowed', opacity: canSignCustomer ? 1 : 0.6 }}><span>🏢 3. Заказчик</span><span>{signatures.customer ? '✅ Подписано' : canSignCustomer ? '❌ Подписать' : '🔒 Нет прав'}</span></button>
+                <button disabled={!canSignMaster} onClick={() => handleToggleSignature('master')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.master ? '#c8e6c9' : canSignMaster ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignMaster ? 'pointer' : 'not-allowed', opacity: canSignMaster ? 1 : 0.6 }}>
+                  <span>👨‍🔧 1. Мастер цеха</span>
+                  <span>{signatures.master ? '✅ Подписано' : canSignMaster ? '❌ Подписать' : '🔒 Нет прав'}</span>
+                </button>
+                <button disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.inspector ? '#c8e6c9' : canSignInspector ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignInspector ? 'pointer' : 'not-allowed', opacity: canSignInspector ? 1 : 0.6 }}>
+                  <span>🕵️‍♂️ 2. Приёмщик ВК</span>
+                  <span>{signatures.inspector ? '✅ Подписано' : canSignInspector ? '❌ Подписать' : '🔒 Нет прав'}</span>
+                </button>
+                <button disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')} style={{ padding: '8px', display: 'flex', justifyContent: 'space-between', background: signatures.customer ? '#c8e6c9' : canSignCustomer ? '#fff' : '#f5f5f5', border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canSignCustomer ? 'pointer' : 'not-allowed', opacity: canSignCustomer ? 1 : 0.6 }}>
+                  <span>🏢 3. Заказчик</span>
+                  <span>{signatures.customer ? '✅ Подписано' : canSignCustomer ? '❌ Подписать' : '🔒 Нет прав'}</span>
+                </button>
               </div>
             </div>
 
             {selectedCase.current_status === '08 REPAIR_PAUSED' && (
-              <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}><div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '13px' }}>⛔ Задержка: {activeDelay?.category}</div><div style={{ fontSize: '13px' }}>Причина: <b>{activeDelay?.cause}</b></div>{canEditOps && (<button onClick={handleUnblockRepair} style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>✅ Снять задержку</button>)}</div>
+              <div style={{ background: '#ffebee', border: '1px solid #ef5350', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                <div style={{ fontWeight: 'bold', color: '#c62828', fontSize: '13px' }}>⛔ Задержка: {activeDelay?.category}</div>
+                <div style={{ fontSize: '13px' }}>Причина: <b>{activeDelay?.cause}</b></div>
+                {canEditOps && (
+                  <button onClick={handleUnblockRepair} style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                    ✅ Снять задержку
+                  </button>
+                )}
+              </div>
             )}
 
-            {canEditOps && (
-              <>
-                <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Сменить статус:</p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
-                  {STATUSES.map(st => {
-                    const isBlocked = st === '12 REPAIR_DONE' && !isFullySigned;
-                    return <button key={st} disabled={st === selectedCase.current_status || loading || isBlocked} onClick={() => handleUpdateStatus(st)} style={{ padding: '8px', textAlign: 'left', background: st === '08 REPAIR_PAUSED' ? '#ffebee' : isBlocked ? '#f5f5f5' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5', border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc', color: isBlocked ? '#aaa' : st === '08 REPAIR_PAUSED' ? '#c62828' : '#333', borderRadius: '6px', cursor: isBlocked ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: st === '08 REPAIR_PAUSED' || st === '12 REPAIR_DONE' ? 'bold' : 'normal' }}>{isBlocked ? '🔒 12 REPAIR_DONE (Нужно 3 подписи)' : st === '08 REPAIR_PAUSED' ? '⛔ Заблокировать' : st}</button>;
-                  })}
-                </div>
-                <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (Справки, Акты):</h4>
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
-                  {/* ОБНОВЛЕННЫЙ СПИСОК ДОКУМЕНТОВ */}
-                  <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
-                    <option value="Справка 2612">Справка 2612</option>
-                    <option value="Акт осмотра">Акт осмотра</option>
-                    <option value="ВУ-23М">ВУ-23М</option>
-                    <option value="ВУ-22">ВУ-22</option>
-                    <option value="ВУ-36М">ВУ-36М</option>
-                  </select>
-                  <input type="text" placeholder="№ документа" value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }}/>
-                  <button onClick={handleAddDocument} style={{ padding: '6px 12px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px' }}>+ Add</button>
-                </div>
-              </>
-            )}
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '16px', marginTop: '8px' }}>
-              {documents.map((d: any) => (<div key={d.id} style={{ background: '#e8f5e9', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', display: 'flex', justifyContent: 'space-between' }}><span><b>{d.doc_type}</b> № {d.doc_number}</span><span style={{ color: '#666' }}>{d.doc_date}</span></div>))}
-            </div>
-
-            <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>История изменений:</h4>
+            {/* ЭТАП 4: ИСТОРИЯ ИЗМЕНЕНИЙ */}
+            <h4 style={{ margin: '16px 0 8px', fontSize: '13px', color: '#666' }}>📜 Журнал событий по вагону:</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
               {statusHistory.map((ev: any) => (
-                <div key={ev.event_id || ev.recorded_datetime} style={{ background: '#f9f9f9', padding: '8px', borderRadius: '6px', borderLeft: '3px solid #0088cc', fontSize: '12px' }}>
+                <div key={ev.event_id || ev.recorded_datetime} style={{ background: '#f9f9f9', padding: '8px', borderRadius: '6px', borderLeft: '3px solid #0088cc', fontSize: '11px' }}>
                   <div>Статус: <b>{ev.new_status}</b></div>
-                  <div style={{ color: '#666', fontSize: '11px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
+                  <div style={{ color: '#888', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
                   {ev.comment && <div style={{ color: '#444', fontStyle: 'italic', marginTop: '2px' }}>{ev.comment}</div>}
                 </div>
               ))}
             </div>
 
-            <button onClick={() => setSelectedCase(null)} style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px' }}>Закрыть</button>
+            <button onClick={() => setSelectedCase(null)} style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+              Закрыть
+            </button>
           </div>
         </div>
       )}
