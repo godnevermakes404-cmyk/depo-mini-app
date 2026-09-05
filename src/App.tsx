@@ -47,6 +47,10 @@ export default function App() {
   const [shopProgress, setShopProgress] = useState<Record<string, boolean>>({ telezhka: false, kolesa: false, malyarka: false, sborka: false });
   const [signatures, setSignatures] = useState<Record<string, boolean>>({ master: false, inspector: false, customer: false });
   
+  // Новые стейты для дефектов и материалов
+  const [inputDefects, setInputDefects] = useState('');
+  const [materialUsage, setMaterialUsage] = useState('');
+
   const [activeDelay, setActiveDelay] = useState<any>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -60,7 +64,7 @@ export default function App() {
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayCause, setDelayCause] = useState('');
-  const [docType, setDocType] = useState('VU-23');
+  const [docType, setDocType] = useState('Справка 2612');
   const [docNumber, setDocNumber] = useState('');
 
   const [repairs, setRepairs] = useState<any[]>([]);
@@ -109,7 +113,6 @@ export default function App() {
         if (insertError) {
           alert("Ошибка БД при регистрации пользователя: " + insertError.message);
         }
-
         setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       }
     } else {
@@ -123,7 +126,7 @@ export default function App() {
     const { data, error } = await supabase
       .from('repair_cases')
       .select(`
-        repair_id, current_status, repair_type, created_at, sla_deadline, updated_at, shop_progress, signatures,
+        repair_id, current_status, repair_type, created_at, sla_deadline, updated_at, shop_progress, signatures, input_defects, material_usage,
         wagons ( wagon_number, wagon_type, owner_type )
       `)
       .order('created_at', { ascending: false });
@@ -146,6 +149,8 @@ export default function App() {
     setSelectedCase(item);
     setShopProgress(item.shop_progress || { telezhka: false, kolesa: false, malyarka: false, sborka: false });
     setSignatures(item.signatures || { master: false, inspector: false, customer: false });
+    setInputDefects(item.input_defects || '');
+    setMaterialUsage(item.material_usage || '');
     
     if (item.current_status === '08 REPAIR_PAUSED') {
       const { data: delay } = await supabase.from('delay_log').select('*').eq('repair_id', item.repair_id).is('end_datetime', null).order('start_datetime', { ascending: false }).maybeSingle();
@@ -200,12 +205,24 @@ export default function App() {
 
       if (newSigs.master && newSigs.inspector && newSigs.customer) {
         const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
-        await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: 'VU-36', doc_number: autoDocNum, doc_date: new Date().toISOString().split('T')[0] }]);
+        await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: 'ВУ-36М', doc_number: autoDocNum, doc_date: new Date().toISOString().split('T')[0] }]);
         alert(`Все 3 подписи получены! Акт ВУ-36М № ${autoDocNum} сформирован автоматически.`);
         openCaseDetails(selectedCase);
       }
       loadData();
     } catch (err: any) { alert('Ошибка подписи: ' + err.message); }
+  }
+
+  async function handleSaveTechData() {
+    if (!canEditOps || !selectedCase) return;
+    setLoading(true);
+    try {
+      await supabase.from('repair_cases')
+        .update({ input_defects: inputDefects, material_usage: materialUsage })
+        .eq('repair_id', selectedCase.repair_id);
+      alert('Технические данные (дефекты и материалы) сохранены!');
+      loadData();
+    } catch(err: any) { alert('Ошибка: ' + err.message); } finally { setLoading(false); }
   }
 
   async function handleCreateRepair() {
@@ -302,6 +319,21 @@ export default function App() {
   const delayStats = DELAY_CATEGORIES.map(cat => ({ category: cat, count: delayLogs.filter((d: any) => d.category === cat).length }));
   const isFullySigned = signatures.master && signatures.inspector && signatures.customer;
 
+  // Группировка выпуска за текущий месяц (Для отчета)
+  const currentMonth = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  const monthlyReleases = completedCases.filter((c: any) => {
+    const d = new Date(c.updated_at || c.created_at);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const releaseGroups = monthlyReleases.reduce((acc: any, curr: any) => {
+    const rt = curr.repair_type;
+    if (!acc[rt]) acc[rt] = [];
+    acc[rt].push(curr);
+    return acc;
+  }, {});
+
   return (
     <div style={{ padding: '16px', fontFamily: 'sans-serif', maxWidth: '480px', margin: '0 auto' }}>
       <header style={{ borderBottom: '1px solid #ccc', paddingBottom: '12px', marginBottom: '12px' }}>
@@ -380,7 +412,30 @@ export default function App() {
             <div style={{ background: '#ffebee', padding: '12px', borderRadius: '8px' }}><div style={{ fontSize: '11px', color: '#555' }}>Всего задержек</div><div style={{ fontSize: '22px', fontWeight: 'bold', color: '#c62828' }}>{delayLogs.length}</div></div>
           </div>
           
-          {/* СТАТИСТИКА ЗАДЕРЖЕК ПО КАТЕГОРИЯМ */}
+          {/* СВОДНЫЙ ОТЧЕТ О ВЫПУСКЕ */}
+          <div style={{ background: '#fff', border: '1px solid #1976d2', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
+            <h4 style={{ margin: '0 0 12px', fontSize: '14px', color: '#1976d2' }}>📋 Выпуск вагонов за текущий месяц</h4>
+            {Object.keys(releaseGroups).length === 0 ? (
+              <p style={{ fontSize: '12px', color: '#888' }}>Нет выпущенных вагонов в этом месяце</p>
+            ) : (
+              Object.keys(releaseGroups).map(rt => (
+                <div key={rt} style={{ marginBottom: '12px' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: '12px', background: '#e3f2fd', padding: '4px 8px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{rt} (Тип ремонта)</span>
+                    <span>Итого: {releaseGroups[rt].length}</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '6px', fontSize: '12px', color: '#333' }}>
+                    {releaseGroups[rt].map((c: any) => (
+                       <div key={c.repair_id} style={{ padding: '4px', borderBottom: '1px solid #f0f0f0' }}>
+                         Вагон № {c.wagons?.wagon_number}
+                       </div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
           <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '14px', marginBottom: '16px' }}>
             <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>Причины задержек (Delay Log)</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -404,6 +459,24 @@ export default function App() {
         <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 100 }}>
           <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '380px', maxHeight: '90vh', overflowY: 'auto' }}>
             <h3 style={{ margin: '0 0 4px' }}>Вагон № {selectedCase.wagons?.wagon_number}</h3><p style={{ fontSize: '11px', color: '#888', margin: '0 0 12px' }}>Repair ID: {selectedCase.repair_id}</p>
+
+            {/* ДЕФЕКТЫ И МАТЕРИАЛЫ */}
+            <div style={{ background: '#fff8e1', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #ffe082' }}>
+              <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#f57f17' }}>🛠️ Тех. состояние и материалы:</h4>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+                Входные дефекты (по Акту осмотра):
+                <textarea disabled={!canEditOps} value={inputDefects} onChange={e => setInputDefects(e.target.value)} placeholder="Например: Излом досок пола 0.6м3..." rows={2} style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px' }} />
+              </label>
+              <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px' }}>
+                Учёт материалов и резок (Цех 24):
+                <textarea disabled={!canEditOps} value={materialUsage} onChange={e => setMaterialUsage(e.target.value)} placeholder="Например: 1.25м х 0.90м = 10 шт. Лист на пол..." rows={2} style={{ width: '100%', padding: '6px', marginTop: '4px', boxSizing: 'border-box', border: '1px solid #ccc', borderRadius: '4px' }} />
+              </label>
+              {canEditOps && (
+                <button onClick={handleSaveTechData} disabled={loading} style={{ width: '100%', padding: '8px', background: '#fbc02d', color: '#333', border: 'none', borderRadius: '4px', fontSize: '12px', fontWeight: 'bold' }}>
+                  💾 Сохранить тех. данные
+                </button>
+              )}
+            </div>
 
             <div style={{ background: '#f0f4f8', borderRadius: '8px', padding: '12px', marginBottom: '12px', border: '1px solid #d0d7de' }}>
               <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: '#1976d2' }}>🏭 Чек-лист цехов:</h4>
@@ -437,8 +510,19 @@ export default function App() {
                     return <button key={st} disabled={st === selectedCase.current_status || loading || isBlocked} onClick={() => handleUpdateStatus(st)} style={{ padding: '8px', textAlign: 'left', background: st === '08 REPAIR_PAUSED' ? '#ffebee' : isBlocked ? '#f5f5f5' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5', border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc', color: isBlocked ? '#aaa' : st === '08 REPAIR_PAUSED' ? '#c62828' : '#333', borderRadius: '6px', cursor: isBlocked ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: st === '08 REPAIR_PAUSED' || st === '12 REPAIR_DONE' ? 'bold' : 'normal' }}>{isBlocked ? '🔒 12 REPAIR_DONE (Нужно 3 подписи)' : st === '08 REPAIR_PAUSED' ? '⛔ Заблокировать' : st}</button>;
                   })}
                 </div>
-                <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (ВУ-23, ВУ-22):</h4>
-                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}><select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}><option value="VU-23">ВУ-23М</option><option value="VU-22">ВУ-22</option></select><input type="text" placeholder="№ документа" value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }}/><button onClick={handleAddDocument} style={{ padding: '6px 12px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px' }}>+ Add</button></div>
+                <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>Документы (Справки, Акты):</h4>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
+                  {/* ОБНОВЛЕННЫЙ СПИСОК ДОКУМЕНТОВ */}
+                  <select value={docType} onChange={e => setDocType(e.target.value)} style={{ padding: '6px', fontSize: '12px' }}>
+                    <option value="Справка 2612">Справка 2612</option>
+                    <option value="Акт осмотра">Акт осмотра</option>
+                    <option value="ВУ-23М">ВУ-23М</option>
+                    <option value="ВУ-22">ВУ-22</option>
+                    <option value="ВУ-36М">ВУ-36М</option>
+                  </select>
+                  <input type="text" placeholder="№ документа" value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ flex: 1, padding: '6px', fontSize: '12px' }}/>
+                  <button onClick={handleAddDocument} style={{ padding: '6px 12px', background: '#0088cc', color: '#fff', border: 'none', borderRadius: '4px' }}>+ Add</button>
+                </div>
               </>
             )}
 
@@ -446,7 +530,6 @@ export default function App() {
               {documents.map((d: any) => (<div key={d.id} style={{ background: '#e8f5e9', padding: '6px 10px', borderRadius: '4px', fontSize: '12px', display: 'flex', justifyContent: 'space-between' }}><span><b>{d.doc_type}</b> № {d.doc_number}</span><span style={{ color: '#666' }}>{d.doc_date}</span></div>))}
             </div>
 
-            {/* ИСТОРИЯ ИЗМЕНЕНИЙ (STATUS EVENTS) */}
             <h4 style={{ margin: '16px 0 8px', fontSize: '14px' }}>История изменений:</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
               {statusHistory.map((ev: any) => (
