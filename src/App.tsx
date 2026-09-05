@@ -13,17 +13,31 @@ const STATUSES = [
   '15 DEPARTED'
 ];
 
+const DELAY_CATEGORIES = [
+  'Materials',
+  'Customer',
+  'Railway',
+  'Internal',
+  'Technical',
+  'External'
+];
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [view, setView] = useState<'dashboard' | 'add_wagon'>('dashboard');
   const [selectedCase, setSelectedCase] = useState<any>(null);
   
-  // Поля формы регистрации
+  // Поля регистрации
   const [wagonNumber, setWagonNumber] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [ownerType, setOwnerType] = useState('Own');
   const [repairType, setRepairType] = useState('ДР');
   const [loading, setLoading] = useState(false);
+
+  // Поля задержки
+  const [showDelayModal, setShowDelayModal] = useState(false);
+  const [delayCategory, setDelayCategory] = useState('Materials');
+  const [delayCause, setDelayCause] = useState('');
 
   // Список ремонтов и статистика
   const [repairs, setRepairs] = useState<any[]>([]);
@@ -48,7 +62,6 @@ export default function App() {
     loadData();
   }, []);
 
-  // Загрузка ремонтов из Supabase
   async function loadData() {
     const { data, error } = await supabase
       .from('repair_cases')
@@ -76,7 +89,6 @@ export default function App() {
     }
   }
 
-  // Создание вагона
   async function handleCreateRepair() {
     if (!wagonNumber.trim()) {
       alert('Введите номер вагона');
@@ -125,7 +137,7 @@ export default function App() {
         comment: 'Первоначальная регистрация ремонта'
       }]);
 
-      alert(`Успешно! Вагон зарегистрирован.`);
+      alert('Успешно! Вагон зарегистрирован.');
       setWagonNumber('');
       setView('dashboard');
       loadData();
@@ -136,13 +148,16 @@ export default function App() {
     }
   }
 
-  // Обновление статуса ремонта
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
-    setLoading(true);
 
+    if (newStatus === '08 REPAIR_PAUSED') {
+      setShowDelayModal(true);
+      return;
+    }
+
+    setLoading(true);
     try {
-      // 1. Фиксируем запись в журнале событий status_events
       await supabase.from('status_events').insert([{
         repair_id: selectedCase.repair_id,
         previous_status: selectedCase.current_status,
@@ -150,7 +165,6 @@ export default function App() {
         comment: 'Смена статуса из Telegram Mini App'
       }]);
 
-      // 2. Обновляем текущий статус в repair_cases
       const { error } = await supabase
         .from('repair_cases')
         .update({ current_status: newStatus, updated_at: new Date().toISOString() })
@@ -158,11 +172,52 @@ export default function App() {
 
       if (error) throw error;
 
-      alert(`Статус успешно изменен на: ${newStatus}`);
+      alert(`Статус изменен на: ${newStatus}`);
       setSelectedCase(null);
       loadData();
     } catch (err: any) {
       alert('Ошибка при смене статуса: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleConfirmDelay() {
+    if (!delayCause.trim()) {
+      alert('Укажите причину остановки ремонта');
+      return;
+    }
+    setLoading(true);
+
+    try {
+      await supabase.from('delay_log').insert([{
+        repair_id: selectedCase.repair_id,
+        category: delayCategory,
+        cause: delayCause,
+        start_datetime: new Date().toISOString()
+      }]);
+
+      await supabase.from('status_events').insert([{
+        repair_id: selectedCase.repair_id,
+        previous_status: selectedCase.current_status,
+        new_status: '08 REPAIR_PAUSED',
+        comment: `Задержка (${delayCategory}): ${delayCause}`
+      }]);
+
+      const { error } = await supabase
+        .from('repair_cases')
+        .update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() })
+        .eq('repair_id', selectedCase.repair_id);
+
+      if (error) throw error;
+
+      alert('Ремонт заблокирован, причина зафиксирована в Delay Log!');
+      setShowDelayModal(false);
+      setSelectedCase(null);
+      setDelayCause('');
+      loadData();
+    } catch (err: any) {
+      alert('Ошибка фиксации задержки: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -179,7 +234,6 @@ export default function App() {
 
       {view === 'dashboard' ? (
         <>
-          {/* Счётчики */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
             <div style={{ background: '#f0f4f8', padding: '10px', borderRadius: '8px' }}>
               <div style={{ fontSize: '11px', color: '#555' }}>Всего ремонтов</div>
@@ -217,7 +271,6 @@ export default function App() {
             + Зарегистрировать вагон
           </button>
 
-          {/* Реестр вагонов */}
           <h3 style={{ margin: '0 0 10px', fontSize: '16px' }}>Реестр вагонов на территории</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {repairs.length === 0 ? (
@@ -228,8 +281,8 @@ export default function App() {
                   key={item.repair_id}
                   onClick={() => setSelectedCase(item)}
                   style={{
-                    background: '#fff',
-                    border: '1px solid #e0e0e0',
+                    background: item.current_status === '08 REPAIR_PAUSED' ? '#fff5f5' : '#fff',
+                    border: item.current_status === '08 REPAIR_PAUSED' ? '1px solid #ffcdd2' : '1px solid #e0e0e0',
                     borderRadius: '8px',
                     padding: '12px',
                     cursor: 'pointer',
@@ -244,8 +297,8 @@ export default function App() {
                       fontSize: '11px', 
                       padding: '3px 8px', 
                       borderRadius: '12px', 
-                      background: item.current_status === '07 IN_REPAIR' ? '#e3f2fd' : '#f5f5f5',
-                      color: item.current_status === '07 IN_REPAIR' ? '#1976d2' : '#333',
+                      background: item.current_status === '08 REPAIR_PAUSED' ? '#ffebee' : item.current_status === '07 IN_REPAIR' ? '#e3f2fd' : '#f5f5f5',
+                      color: item.current_status === '08 REPAIR_PAUSED' ? '#c62828' : item.current_status === '07 IN_REPAIR' ? '#1976d2' : '#333',
                       fontWeight: 'bold'
                     }}>
                       {item.current_status}
@@ -261,7 +314,6 @@ export default function App() {
           </div>
         </>
       ) : (
-        /* Форма добавления */
         <div style={{ background: '#f9f9f9', padding: '16px', borderRadius: '8px' }}>
           <h3 style={{ marginTop: 0 }}>Регистрация вагона</h3>
           <label style={{ display: 'block', marginBottom: '8px', fontSize: '14px' }}>
@@ -310,8 +362,8 @@ export default function App() {
         </div>
       )}
 
-      {/* Всплывающее окно изменения статуса */}
-      {selectedCase && (
+      {/* Окно выбора статуса */}
+      {selectedCase && !showDelayModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
           background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
@@ -332,14 +384,16 @@ export default function App() {
                   style={{
                     padding: '8px 12px',
                     textAlign: 'left',
-                    background: st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5',
-                    border: '1px solid #ccc',
+                    background: st === '08 REPAIR_PAUSED' ? '#ffebee' : st === selectedCase.current_status ? '#e0e0e0' : '#f5f5f5',
+                    border: st === '08 REPAIR_PAUSED' ? '1px solid #ef5350' : '1px solid #ccc',
+                    color: st === '08 REPAIR_PAUSED' ? '#c62828' : '#333',
                     borderRadius: '6px',
                     cursor: 'pointer',
-                    fontSize: '13px'
+                    fontSize: '13px',
+                    fontWeight: st === '08 REPAIR_PAUSED' ? 'bold' : 'normal'
                   }}
                 >
-                  {st}
+                  {st === '08 REPAIR_PAUSED' ? '⛔ 08 REPAIR_PAUSED (Заблокировать)' : st}
                 </button>
               ))}
             </div>
@@ -349,6 +403,70 @@ export default function App() {
               style={{ width: '100%', padding: '10px', background: '#333', color: '#fff', border: 'none', borderRadius: '6px' }}
             >
               Закрыть
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Окно фиксации задержки */}
+      {showDelayModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px'
+        }}>
+          <div style={{ background: '#fff', borderRadius: '12px', padding: '20px', width: '100%', maxWidth: '360px' }}>
+            <h3 style={{ margin: '0 0 8px', color: '#c62828' }}>⛔ Фиксация задержки</h3>
+            <p style={{ fontSize: '13px', color: '#666', margin: '0 0 12px' }}>
+              Вагон № <b>{selectedCase?.wagons?.wagon_number}</b>
+            </p>
+
+            <label style={{ display: 'block', marginBottom: '8px', fontSize: '13px' }}>
+              Категория задержки:
+              <select 
+                value={delayCategory} 
+                onChange={e => setDelayCategory(e.target.value)}
+                style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+              >
+                {DELAY_CATEGORIES.map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'block', marginBottom: '16px', fontSize: '13px' }}>
+              Причина остановки ремонта:
+              <textarea 
+                value={delayCause}
+                onChange={e => setDelayCause(e.target.value)}
+                placeholder="Например: Ожидание поставки боковых рам от заказчика"
+                rows={3}
+                style={{ width: '100%', padding: '8px', marginTop: '4px', boxSizing: 'border-box' }}
+              />
+            </label>
+
+            <button 
+              onClick={handleConfirmDelay}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '12px',
+                backgroundColor: '#d32f2f',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: 'bold',
+                marginBottom: '8px',
+                cursor: 'pointer'
+              }}
+            >
+              {loading ? 'Сохранение...' : 'Заблокировать ремонт'}
+            </button>
+
+            <button 
+              onClick={() => setShowDelayModal(false)}
+              style={{ width: '100%', padding: '8px', background: '#ccc', border: 'none', borderRadius: '6px' }}
+            >
+              Отмена
             </button>
           </div>
         </div>
