@@ -30,8 +30,10 @@ const SHOPS = [
   { id: 'sborka', name: '🔩 Сборка и испытания' }
 ];
 
+type UserRole = 'Dispatcher' | 'Master' | 'Inspector' | 'Customer';
+
 export default function App() {
-  const [user, setUser] = useState<{ name: string; role: 'Dispatcher' | 'Master' | 'Customer'; telegram_id?: number } | null>(null);
+  const [user, setUser] = useState<{ name: string; role: UserRole; telegram_id?: number } | null>(null);
   const [tab, setTab] = useState<'ops' | 'analytics'>('ops');
   const [view, setView] = useState<'dashboard' | 'add_wagon'>('dashboard');
   
@@ -83,10 +85,10 @@ export default function App() {
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
-        setUser({ name: userName, role: dbUser.role as any || 'Dispatcher', telegram_id: tgUser.id });
+        setUser({ name: userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       } else {
         const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgIdStr, full_name: userName, role: 'Dispatcher' }]).select().maybeSingle();
-        setUser({ name: userName, role: newUser?.role || 'Dispatcher', telegram_id: tgUser.id });
+        setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
       }
     } else {
       setUser({ name: 'Разработчик (Браузер)', role: 'Dispatcher' });
@@ -144,8 +146,14 @@ export default function App() {
     if (docs) setDocuments(docs);
   }
 
+  // Права доступа
+  const canEditOps = user?.role === 'Dispatcher' || user?.role === 'Master';
+  const canSignMaster = user?.role === 'Dispatcher' || user?.role === 'Master';
+  const canSignInspector = user?.role === 'Dispatcher' || user?.role === 'Inspector';
+  const canSignCustomer = user?.role === 'Dispatcher' || user?.role === 'Customer';
+
   async function handleToggleShop(shopId: string) {
-    if (!canEdit || !selectedCase) return;
+    if (!canEditOps || !selectedCase) return;
 
     const newProgress = { ...shopProgress, [shopId]: !shopProgress[shopId] };
     setShopProgress(newProgress);
@@ -171,6 +179,19 @@ export default function App() {
   async function handleToggleSignature(sigKey: 'master' | 'inspector' | 'customer') {
     if (!selectedCase) return;
 
+    if (sigKey === 'master' && !canSignMaster) {
+      alert('Ошибка доступа: Подписать может только Мастер цеха!');
+      return;
+    }
+    if (sigKey === 'inspector' && !canSignInspector) {
+      alert('Ошибка доступа: Подписать может только Приёмщик вагонов (ВК)!');
+      return;
+    }
+    if (sigKey === 'customer' && !canSignCustomer) {
+      alert('Ошибка доступа: Подписать может только Представитель Заказчика!');
+      return;
+    }
+
     const newSigs = { ...signatures, [sigKey]: !signatures[sigKey] };
     setSignatures(newSigs);
 
@@ -178,7 +199,7 @@ export default function App() {
       await supabase.from('repair_cases').update({ signatures: newSigs }).eq('repair_id', selectedCase.repair_id);
       
       const sigNames: Record<string, string> = { master: 'Мастер цеха', inspector: 'Приёмщик ВК', customer: 'Представитель Заказчика' };
-      const statusText = newSigs[sigKey] ? 'подписал' : 'отплавал подпись';
+      const statusText = newSigs[sigKey] ? 'подписал' : 'отозвал подпись';
 
       await supabase.from('status_events').insert([{
         repair_id: selectedCase.repair_id,
@@ -187,7 +208,6 @@ export default function App() {
         comment: `Согласование ВУ-36М: ${sigNames[sigKey]} ${statusText} [${user?.name}]`
       }]);
 
-      // Автогенерация ВУ-36М при 100% подписей
       if (newSigs.master && newSigs.inspector && newSigs.customer) {
         const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
         await supabase.from('documents').insert([{
@@ -207,7 +227,7 @@ export default function App() {
   }
 
   async function handleCreateRepair() {
-    if (user?.role === 'Customer') return;
+    if (!canEditOps) return;
     if (!wagonNumber.trim()) { alert('Введите номер вагона'); return; }
     setLoading(true);
 
@@ -256,7 +276,7 @@ export default function App() {
   }
 
   async function handleAddDocument() {
-    if (user?.role === 'Customer') return;
+    if (!canEditOps) return;
     if (!docNumber.trim() || !selectedCase) { alert('Введите номер документа'); return; }
     setLoading(true);
 
@@ -280,7 +300,7 @@ export default function App() {
   }
 
   async function handleConfirmDelay() {
-    if (user?.role === 'Customer') return;
+    if (!canEditOps) return;
     if (!delayCause.trim()) { alert('Укажите причину остановки ремонта'); return; }
     setLoading(true);
 
@@ -309,7 +329,7 @@ export default function App() {
   }
 
   async function handleUnblockRepair() {
-    if (user?.role === 'Customer') return;
+    if (!canEditOps) return;
     if (!selectedCase) return;
     setLoading(true);
 
@@ -337,7 +357,7 @@ export default function App() {
   }
 
   async function handleUpdateStatus(newStatus: string) {
-    if (user?.role === 'Customer') return;
+    if (!canEditOps) return;
     if (!selectedCase) return;
 
     if (newStatus === '08 REPAIR_PAUSED') {
@@ -373,10 +393,11 @@ export default function App() {
     return <span style={{ color: '#2e7d32', fontSize: '11px' }}>⏱ {Math.round(diffHours)} ч</span>;
   }
 
-  function getRoleBadge(role?: string) {
+  function getRoleBadge(role?: UserRole) {
     switch (role) {
       case 'Dispatcher': return <span style={{ background: '#e3f2fd', color: '#1976d2', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Диспетчер</span>;
       case 'Master': return <span style={{ background: '#fff3e0', color: '#ed6c02', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Мастер</span>;
+      case 'Inspector': return <span style={{ background: '#f3e5f5', color: '#7b1fa2', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Приёмщик ВК</span>;
       case 'Customer': return <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '2px 6px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold' }}>Заказчик</span>;
       default: return null;
     }
@@ -392,7 +413,6 @@ export default function App() {
     count: delayLogs.filter((d: any) => d.category === cat).length
   }));
 
-  const canEdit = user?.role === 'Dispatcher' || user?.role === 'Master';
   const isFullySigned = signatures.master && signatures.inspector && signatures.customer;
 
   return (
@@ -432,13 +452,13 @@ export default function App() {
               </div>
             </div>
 
-            {canEdit ? (
+            {canEditOps ? (
               <button onClick={() => setView('add_wagon')} style={{ width: '100%', padding: '12px', backgroundColor: '#0088cc', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: 'bold', cursor: 'pointer', marginBottom: '20px' }}>
                 + Зарегистрировать вагон
               </button>
             ) : (
               <div style={{ padding: '8px', background: '#e8f5e9', color: '#2e7d32', borderRadius: '6px', fontSize: '12px', textAlign: 'center', marginBottom: '16px' }}>
-                👁️ Режим просмотра (Заказчик)
+                👁️ Режим роли «{user?.role}»
               </div>
             )}
 
@@ -617,7 +637,7 @@ export default function App() {
                   return (
                     <button
                       key={shop.id}
-                      disabled={!canEdit}
+                      disabled={!canEditOps}
                       onClick={() => handleToggleShop(shop.id)}
                       style={{
                         padding: '8px 10px',
@@ -627,7 +647,8 @@ export default function App() {
                         background: isDone ? '#e8f5e9' : '#fff',
                         border: isDone ? '1px solid #81c784' : '1px solid #ccc',
                         borderRadius: '6px',
-                        cursor: canEdit ? 'pointer' : 'default',
+                        cursor: canEditOps ? 'pointer' : 'not-allowed',
+                        opacity: canEditOps ? 1 : 0.7,
                         fontSize: '12px',
                         fontWeight: isDone ? 'bold' : 'normal'
                       }}
@@ -640,48 +661,58 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК СОГЛАСОВАНИЯ ВУ-36М */}
+            {/* БЛОК СОГЛАСОВАНИЯ ВУ-36М (С ЗАЩИТОЙ ПО РОЛЯМ) */}
             <div style={{ background: isFullySigned ? '#e8f5e9' : '#fff3e0', borderRadius: '8px', padding: '12px', marginBottom: '16px', border: isFullySigned ? '1px solid #81c784' : '1px solid #ffe0b2' }}>
               <h4 style={{ margin: '0 0 8px', fontSize: '13px', color: isFullySigned ? '#2e7d32' : '#e65100' }}>
                 ✍️ Согласование акта ВУ-36М (Приёмка):
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {/* 1. Мастер цеха */}
                 <button
-                  disabled={!canEdit}
+                  disabled={!canSignMaster}
                   onClick={() => handleToggleSignature('master')}
                   style={{
-                    padding: '8px', display: 'flex', justifyContent: 'space-between',
-                    background: signatures.master ? '#c8e6c9' : '#fff',
-                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canEdit ? 'pointer' : 'default'
+                    padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    background: signatures.master ? '#c8e6c9' : canSignMaster ? '#fff' : '#f5f5f5',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
+                    cursor: canSignMaster ? 'pointer' : 'not-allowed',
+                    opacity: canSignMaster ? 1 : 0.6
                   }}
                 >
                   <span>👨‍🔧 1. Мастер цеха</span>
-                  <span>{signatures.master ? '✅ Подписано' : '❌ Ожидает'}</span>
+                  <span>{signatures.master ? '✅ Подписано' : canSignMaster ? '❌ Подписать' : '🔒 Нет прав'}</span>
                 </button>
 
+                {/* 2. Приёмщик ВК */}
                 <button
-                  disabled={!canEdit}
+                  disabled={!canSignInspector}
                   onClick={() => handleToggleSignature('inspector')}
                   style={{
-                    padding: '8px', display: 'flex', justifyContent: 'space-between',
-                    background: signatures.inspector ? '#c8e6c9' : '#fff',
-                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: canEdit ? 'pointer' : 'default'
+                    padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    background: signatures.inspector ? '#c8e6c9' : canSignInspector ? '#fff' : '#f5f5f5',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
+                    cursor: canSignInspector ? 'pointer' : 'not-allowed',
+                    opacity: canSignInspector ? 1 : 0.6
                   }}
                 >
                   <span>🕵️‍♂️ 2. Приёмщик вагонов (ВК)</span>
-                  <span>{signatures.inspector ? '✅ Подписано' : '❌ Ожидает'}</span>
+                  <span>{signatures.inspector ? '✅ Подписано' : canSignInspector ? '❌ Подписать' : '🔒 Нет прав'}</span>
                 </button>
 
+                {/* 3. Представитель Заказчика */}
                 <button
+                  disabled={!canSignCustomer}
                   onClick={() => handleToggleSignature('customer')}
                   style={{
-                    padding: '8px', display: 'flex', justifyContent: 'space-between',
-                    background: signatures.customer ? '#c8e6c9' : '#fff',
-                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px', cursor: 'pointer'
+                    padding: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    background: signatures.customer ? '#c8e6c9' : canSignCustomer ? '#fff' : '#f5f5f5',
+                    border: '1px solid #ccc', borderRadius: '6px', fontSize: '12px',
+                    cursor: canSignCustomer ? 'pointer' : 'not-allowed',
+                    opacity: canSignCustomer ? 1 : 0.6
                   }}
                 >
                   <span>🏢 3. Представитель Заказчика</span>
-                  <span>{signatures.customer ? '✅ Подписано' : '❌ Ожидает'}</span>
+                  <span>{signatures.customer ? '✅ Подписано' : canSignCustomer ? '❌ Подписать' : '🔒 Нет прав'}</span>
                 </button>
               </div>
             </div>
@@ -694,7 +725,7 @@ export default function App() {
                 <div style={{ fontSize: '13px', color: '#333' }}>
                   Причина: <b>{activeDelay?.cause || 'Не указана'}</b>
                 </div>
-                {canEdit && (
+                {canEditOps && (
                   <button onClick={handleUnblockRepair} disabled={loading} style={{ marginTop: '10px', width: '100%', padding: '8px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 'bold', fontSize: '13px', cursor: 'pointer' }}>
                     {loading ? 'Обработка...' : '✅ Снять задержку (В ремонт)'}
                   </button>
@@ -702,7 +733,7 @@ export default function App() {
               </div>
             )}
 
-            {canEdit && (
+            {canEditOps && (
               <>
                 <p style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '8px' }}>Сменить статус ремонта:</p>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' }}>
