@@ -42,9 +42,9 @@ export default function App() {
     if (!error && data) {
       setStats({
         onSite: data.length,
-        inRepair: data.filter(d => d.current_status === '07 IN_REPAIR').length,
-        inQueue: data.filter(d => d.current_status === '04 QUEUE' || d.current_status === '01 PLANNED').length,
-        blocked: data.filter(d => d.current_status === '08 REPAIR_PAUSED').length
+        inRepair: data.filter((d: any) => d.current_status === '07 IN_REPAIR').length,
+        inQueue: data.filter((d: any) => d.current_status === '04 QUEUE' || d.current_status === '01 PLANNED').length,
+        blocked: data.filter((d: any) => d.current_status === '08 REPAIR_PAUSED').length
       });
     }
   }
@@ -58,36 +58,49 @@ export default function App() {
     setLoading(true);
 
     try {
-      // 1. Проверяем или создаем вагон в справочнике wagons
-      let { data: wagon } = await supabase
+      let wagonId: string | null = null;
+
+      // 1. Проверяем наличие вагона в базе
+      const { data: existingWagon } = await supabase
         .from('wagons')
         .select('id')
         .eq('wagon_number', wagonNumber)
-        .single();
+        .maybeSingle();
 
-      if (!wagon) {
+      if (existingWagon) {
+        wagonId = existingWagon.id;
+      } else {
+        // Если вагона нет, создаем его
         const { data: newWagon, error: wagonError } = await supabase
           .from('wagons')
           .insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }])
           .select()
           .single();
 
-        if (wagonError) throw wagonError;
-        wagon = newWagon;
+        if (wagonError || !newWagon) {
+          throw wagonError || new Error('Не удалось создать вагон');
+        }
+        wagonId = newWagon.id;
+      }
+
+      if (!wagonId) {
+        throw new Error('Идентификатор вагона не определен');
       }
 
       // 2. Создаем Repair Case со статусом 01 PLANNED
       const { data: repairCase, error: repairError } = await supabase
         .from('repair_cases')
         .insert([{
-          wagon_id: wagon.id,
+          wagon_id: wagonId,
           repair_type: repairType,
           current_status: '01 PLANNED'
         }])
         .select()
         .single();
 
-      if (repairError) throw repairError;
+      if (repairError || !repairCase) {
+        throw repairError || new Error('Не удалось создать Repair Case');
+      }
 
       // 3. Записываем первое событие в status_events
       await supabase.from('status_events').insert([{
@@ -102,7 +115,7 @@ export default function App() {
       setView('dashboard');
       fetchStats();
     } catch (err: any) {
-      alert('Ошибка при сохранении: ' + err.message);
+      alert('Ошибка при сохранении: ' + (err.message || 'Неизвестная ошибка'));
     } finally {
       setLoading(false);
     }
