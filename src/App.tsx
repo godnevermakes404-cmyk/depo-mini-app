@@ -12,6 +12,7 @@ declare global { interface Window { Telegram: any; } }
 type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 
 const DOCUMENT_TYPES = [
+  'Справка ВУ 36М',
   'АКТ ВУ-23 (Ремонт завершен)',
   'АКТ ВУ-22 (Дефектная ведомость)',
   'Справка 2612',
@@ -76,7 +77,7 @@ export default function App() {
         setUser(newUser);
       }
     } else {
-      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир (Диспетчер)', role: 'DISPATCHER' });
+      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Диспетчер', role: 'DISPATCHER' });
     }
     loadData();
   }
@@ -104,7 +105,6 @@ export default function App() {
     vibrate('light');
     setSelectedCase(item);
     
-    // Загрузка журнала событий с автором
     const { data: events } = await supabase
       .from('status_events')
       .select('*, users(name, role)')
@@ -112,7 +112,6 @@ export default function App() {
       .order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
 
-    // Загрузка прикрепленных документов
     const { data: docs } = await supabase
       .from('documents')
       .select('*')
@@ -175,6 +174,7 @@ export default function App() {
     setLoading(false);
   }
 
+  // Атомарная вызов-процедура для задержки
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) {
       alert('Заполните причину, ответственного и следующее действие (Next Action)!');
@@ -184,31 +184,29 @@ export default function App() {
     setLoading(true);
     vibrate('heavy');
 
-    await supabase.from('delay_log').insert([{
-      repair_id: selectedCase.repair_id,
-      category: delayCategory,
-      delay_type: delayType,
-      cause: delayCause,
-      responsible_party: responsibleParty,
-      next_action: nextAction,
-      action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null,
-      start_datetime: new Date().toISOString()
-    }]);
-
-    await supabase.rpc('change_repair_status', {
+    const { error } = await supabase.rpc('register_delay', {
       p_repair_id: selectedCase.repair_id,
-      p_new_status: '08 REPAIR_PAUSED',
-      p_user_id: user?.id,
-      p_comment: `Задержка [${delayCategory}]: ${delayCause}`
+      p_category: delayCategory,
+      p_delay_type: delayType,
+      p_cause: delayCause,
+      p_responsible_party: responsibleParty,
+      p_next_action: nextAction,
+      p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null,
+      p_user_id: user?.id
     });
 
-    setShowDelayModal(false);
-    setSelectedCase(null);
-    setDelayCause(''); setNextAction(''); setResponsibleParty('');
-    loadData();
+    if (error) {
+      alert('Ошибка регистрации задержки (БД блокировка): ' + error.message);
+    } else {
+      setShowDelayModal(false);
+      setSelectedCase(null);
+      setDelayCause(''); setNextAction(''); setResponsibleParty('');
+      loadData();
+    }
     setLoading(false);
   }
 
+  // Атомарный вызов-процедура для создания ремонта
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите корректный 8-значный номер вагона!');
@@ -216,38 +214,22 @@ export default function App() {
     }
 
     setLoading(true);
-    try {
-      let wagonId: string | null = null;
-      const { data: existingWagon } = await supabase.from('wagons').select('id').eq('wagon_number', wagonNumber).maybeSingle();
-      if (existingWagon) {
-        wagonId = existingWagon.id;
-      } else {
-        const { data: w } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner, owner_type: ownerType }]).select().single();
-        wagonId = w?.id;
-      }
+    vibrate('medium');
 
-      const { data: rCase, error } = await supabase.from('repair_cases').insert([{
-        wagon_id: wagonId,
-        repair_type: repairType,
-        current_status: '01 PLANNED',
-        sla_deadline: new Date(Date.now() + 72 * 3600 * 1000).toISOString()
-      }]).select().single();
+    const { error } = await supabase.rpc('create_repair_case', {
+      p_wagon_number: wagonNumber,
+      p_repair_type: repairType,
+      p_user_id: user?.id
+    });
 
-      if (error) throw error;
-
-      await supabase.rpc('change_repair_status', {
-        p_repair_id: rCase.repair_id,
-        p_new_status: '01 PLANNED',
-        p_user_id: user?.id,
-        p_comment: 'Регистрация вагона в системе'
-      });
-
-      setWagonNumber(''); setShowAddModal(false); loadData();
-    } catch (err: any) {
-      alert('Ошибка создания: ' + err.message);
-    } finally {
-      setLoading(false);
+    if (error) {
+      alert('Ошибка создания: ' + error.message);
+    } else {
+      setWagonNumber('');
+      setShowAddModal(false);
+      loadData();
     }
+    setLoading(false);
   }
 
   function exportToCSV() {
@@ -428,11 +410,23 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* Допустимые действия по State Machine */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
               {availableTransitions.length === 0 ? (
-                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Цепочка завершена</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: 0 }}>Цепочка завершена</p>
+                  <button 
+                    className="btn-primary" 
+                    style={{ padding: '6px 12px', fontSize: '11px', width: 'auto' }}
+                    onClick={() => {
+                      setDocType('Справка ВУ 36М');
+                      const docInput = document.getElementById('doc-number-input');
+                      if (docInput) docInput.focus();
+                    }}
+                  >
+                    → Подгрузить справку ВУ 36М
+                  </button>
+                </div>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                   {availableTransitions.map((st: string) => (
@@ -444,7 +438,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Блок документов и актов */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
                 📄 Документы и Акты
@@ -466,24 +459,11 @@ export default function App() {
                 <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>
                   {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
                 </select>
-                <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+                <input id="doc-number-input" className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
                 <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
               </div>
             </div>
 
-            {/* Блок ответственных лиц */}
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
-                👨‍🔧 Ответственные лица
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
-                <div><b>Диспетчер:</b> {user?.name || 'Владимир'}</div>
-                <div><b>Мастер цеха:</b> Иванов И.И.</div>
-                <div><b>Приёмщик ВК:</b> Сидоров С.С.</div>
-              </div>
-            </div>
-
-            {/* Журнал событий с выводом автора */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -492,7 +472,7 @@ export default function App() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                       <span>{STATUS_RU[ev.new_status] || ev.new_status}</span>
                       <span style={{ color: 'var(--brand-color)', fontWeight: 'normal' }}>
-                        👤 {ev.users?.name || user?.name || 'Диспетчер'}
+                        👤 {ev.users?.name || 'Система'}
                       </span>
                     </div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px' }}>
@@ -507,7 +487,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка задержки */}
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
