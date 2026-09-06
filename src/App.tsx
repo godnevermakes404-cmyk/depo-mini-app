@@ -300,7 +300,7 @@ export default function App() {
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
                   {forecastBreaches.length > 0 && (
-                    <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг. (Прогноз > SLA)</div>
+                    <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг. (Прогноз &gt; SLA)</div>
                   )}
                   {readyNotDispatched.length > 0 && (
                     <div><b>🚂 Ожидают отправки:</b> {readyNotDispatched.length} ваг. (Готовы к выпуску)</div>
