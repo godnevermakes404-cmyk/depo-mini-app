@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import { 
   STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
-  runDataQualityChecks, calculateLostWagonDays, 
+  runDataQualityChecks, calculateLostWagonDays, calculateCyclePercentiles,
   type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
 import './App.css';
@@ -29,6 +29,7 @@ export default function App() {
 
   const [repairs, setRepairs] = useState<any[]>([]);
   const [delayLogs, setDelayLogs] = useState<any[]>([]);
+  const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -95,6 +96,9 @@ export default function App() {
     const { data: delays, error: delayErr } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     if (delayErr) console.error("Ошибка загрузки задержек:", delayErr.message);
 
+    const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
+    if (metrics) setTimeMetricsList(metrics);
+
     if (repairData) {
       setRepairs(repairData);
       setDelayLogs(delays || []);
@@ -106,7 +110,6 @@ export default function App() {
     vibrate('light');
     setSelectedCase(item);
     
-    // Загрузка метрик времени из SQL View
     const { data: timeMetrics } = await supabase
       .from('v_repair_time_metrics')
       .select('*')
@@ -127,7 +130,6 @@ export default function App() {
       setSelectedMetrics(null);
     }
 
-    // Загрузка событий
     const { data: events } = await supabase
       .from('status_events')
       .select('*, users(name, role)')
@@ -135,7 +137,6 @@ export default function App() {
       .order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
 
-    // Загрузка документов
     const { data: docs } = await supabase
       .from('documents')
       .select('*')
@@ -280,9 +281,14 @@ export default function App() {
   const lostWagonDays = calculateLostWagonDays(delayLogs);
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
 
-  // Расчёт контрольных рисков для Диспетчера
   const readyNotDispatched = repairs.filter(r => r.current_status === '11 READY_TO_DISPATCH');
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
+
+  // Аналитика перцентилей цикла
+  const drHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === m.repair_id)?.repair_type === 'ДР').map(m => Number(m.total_dwell_hours || 0));
+  const krHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === m.repair_id)?.repair_type === 'КР').map(m => Number(m.total_dwell_hours || 0));
+  const drCycle = calculateCyclePercentiles(drHours);
+  const krCycle = calculateCyclePercentiles(krHours);
 
   return (
     <div>
@@ -294,7 +300,6 @@ export default function App() {
       <div className="content-area">
         {currentTab === 'home' && (
           <>
-            {/* Блок исключений (Management by Exception) */}
             {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
@@ -353,6 +358,8 @@ export default function App() {
 
             {filteredRepairs.map((item: any) => {
               const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
+              const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
+
               return (
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -365,6 +372,14 @@ export default function App() {
                       {isBreached ? '⚠️ Риск SLA' : item.wagons?.owner_type}
                     </span>
                   </div>
+
+                  {/* Exception Management информер прямо на карточке вагона */}
+                  {activeDelay && (
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}>
+                      <div><b>⛔ {activeDelay.category}:</b> {activeDelay.cause}</div>
+                      <div style={{ color: 'var(--text-main)', marginTop: '2px' }}>👉 <b>Next Action:</b> {activeDelay.next_action} ({activeDelay.responsible_party})</div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -374,20 +389,37 @@ export default function App() {
         )}
 
         {currentTab === 'analytics' && (
-          <div className="premium-card">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
-            {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
-              <div key={cat} style={{ marginBottom: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-                  <span><b>{cat}</b></span>
-                  <span>{days.toFixed(1)} вагон-дней</span>
+          <>
+            {/* Медиана, P80 и P90 цикла нахождения */}
+            <div className="premium-card">
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта (Dwell Time)</h3>
+              <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
+                  <span><b>Деповской ремонт (ДР):</b></span>
+                  <span>Медиана: <b>{drCycle.median} дн</b> | P90: <b>{drCycle.p90} дн</b></span>
                 </div>
-                <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}>
-                  <div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
+                  <span><b>Капитальный ремонт (КР):</b></span>
+                  <span>Медиана: <b>{krCycle.median} дн</b> | P90: <b>{krCycle.p90} дн</b></span>
                 </div>
               </div>
-            ))}
-          </div>
+            </div>
+
+            <div className="premium-card">
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
+              {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
+                <div key={cat} style={{ marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
+                    <span><b>{cat}</b></span>
+                    <span>{days.toFixed(1)} вагон-дней</span>
+                  </div>
+                  <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}>
+                    <div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         {currentTab === 'profile' && (
@@ -445,7 +477,7 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* Блок модели времени (Time Model) */}
+            {/* Блок модели времени */}
             {selectedMetrics && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Модель времени (Time Model)</h4>
@@ -462,7 +494,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Допустимые действия по State Machine */}
+            {/* State Machine */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
               {availableTransitions.length === 0 ? (

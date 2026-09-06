@@ -106,3 +106,22 @@ export function calculateLostWagonDays(delays: any[]): { totalDays: number; byCa
 
   return { totalDays: Number((totalHours / 24).toFixed(1)), byCategory };
 }
+
+// Расчет медианы, P80 и P90 по массиву часов
+export function calculateCyclePercentiles(hoursArray: number[]): { median: number; p80: number; p90: number } {
+  if (hoursArray.length === 0) return { median: 0, p80: 0, p90: 0 };
+  const sorted = [...hoursArray].sort((a, b) => a - b);
+  
+  const getQuantile = (q: number) => {
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base];
+  };
+
+  return {
+    median: Number((getQuantile(0.5) / 24).toFixed(1)), // в днях
+    p80: Number((getQuantile(0.8) / 24).toFixed(1)),
+    p90: Number((getQuantile(0.9) / 24).toFixed(1))
+  };
+}
