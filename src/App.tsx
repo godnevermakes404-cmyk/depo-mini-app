@@ -6,6 +6,17 @@ import './App.css';
 declare global { interface Window { Telegram: any; } }
 
 const STATUSES = ['01 PLANNED', '02 ARRIVED', '04 QUEUE', '07 IN_REPAIR', '08 REPAIR_PAUSED', '12 REPAIR_DONE', '15 DEPARTED'];
+
+const STATUS_MAP: Record<string, string> = {
+  '01 PLANNED': 'Запланирован',
+  '02 ARRIVED': 'Прибыл',
+  '04 QUEUE': 'В очереди',
+  '07 IN_REPAIR': 'В ремонте',
+  '08 REPAIR_PAUSED': 'Задержка',
+  '12 REPAIR_DONE': 'Отремонтирован',
+  '15 DEPARTED': 'Отправлен'
+};
+
 const DELAY_CATEGORIES = ['Materials', 'Customer', 'Railway', 'Internal', 'Technical', 'External'];
 const DOCUMENT_TYPES = ['Справка 2612', 'Справка 2602', 'Акт осмотра', 'ВУ-23М', 'ВУ-22', 'ВУ-36М', 'Паспорт вагона'];
 const SLA_HOURS: Record<string, number> = { 'ТОР': 24, 'ДР': 72, 'КР': 120, 'КРП': 144, 'Модернизация': 168 };
@@ -266,7 +277,9 @@ export default function App() {
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isPaused ? '4px solid var(--danger)' : 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '16px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
-                    <span className="status-pill" style={{ color: isPaused ? 'var(--danger)' : 'var(--brand-color)' }}>{item.current_status.split(' ')[1]}</span>
+                    <span className="status-pill" style={{ color: isPaused ? 'var(--danger)' : 'var(--brand-color)' }}>
+                      {STATUS_MAP[item.current_status] || item.current_status}
+                    </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
                     <span>{item.repair_type} ({item.wagons?.wagon_type})</span>
@@ -380,7 +393,6 @@ export default function App() {
           <div className="bottom-sheet">
             <div className="sheet-handle"></div>
             
-            {/* Шапка карточки вагона с типом и SLA */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
               <div>
                 <h3 style={{ margin: '0 0 2px 0', fontSize: '18px', fontWeight: '800' }}>№ {selectedCase.wagons?.wagon_number}</h3>
@@ -399,7 +411,7 @@ export default function App() {
                   {STATUSES.map(st => (
                     <button key={st} disabled={st === selectedCase.current_status || loading} onClick={() => handleUpdateStatus(st)} 
                       style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', fontWeight: '600', fontSize: '11px', whiteSpace: 'nowrap', background: st === selectedCase.current_status ? 'var(--text-main)' : 'var(--bg-color)', color: st === selectedCase.current_status ? 'var(--card-bg)' : 'var(--text-main)' }}>
-                      {st.split(' ')[1]}
+                      {STATUS_MAP[st] || st}
                     </button>
                   ))}
                 </div>
@@ -458,7 +470,7 @@ export default function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {statusHistory.map((ev: any) => (
                   <div key={ev.event_id || ev.recorded_datetime} style={{ background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
-                    <div style={{ fontWeight: 'bold' }}>{ev.new_status}</div>
+                    <div style={{ fontWeight: 'bold' }}>{STATUS_MAP[ev.new_status] || ev.new_status}</div>
                     <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
                     {ev.comment && <div style={{ marginTop: '2px', fontStyle: 'italic' }}>{ev.comment}</div>}
                   </div>
