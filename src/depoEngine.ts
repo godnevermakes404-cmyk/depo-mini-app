@@ -55,6 +55,14 @@ export interface DQViolation {
   message: string;
 }
 
+export interface RepairTimeMetrics {
+  total_dwell_hours: number;
+  queue_hours: number;
+  gross_repair_hours: number;
+  paused_hours: number;
+  net_repair_hours: number;
+}
+
 export function runDataQualityChecks(repairs: any[], delays: any[]): DQViolation[] {
   const violations: DQViolation[] = [];
   const now = new Date().getTime();
@@ -64,7 +72,7 @@ export function runDataQualityChecks(repairs: any[], delays: any[]): DQViolation
     const wagonNum = r.wagons?.wagon_number || 'Неизвестный';
 
     if (r.sla_deadline && new Date(r.sla_deadline).getTime() < now && activeDelays.length === 0 && ON_SITE_STATUSES.includes(r.current_status)) {
-      violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'OVERDUE_NO_BLOCKER', severity: 'CRITICAL', message: 'Просрочен по SLA, но Blocker не зарегистрирован' });
+      violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'OVERDUE_NO_BLOCKER', severity: 'CRITICAL', message: 'Просрочен по SLA, но задержка не зафиксирована' });
     }
 
     if (r.current_status === '08 REPAIR_PAUSED') {
@@ -72,14 +80,11 @@ export function runDataQualityChecks(repairs: any[], delays: any[]): DQViolation
         if (!d.next_action || !d.responsible_party) {
           violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'BLOCKED_NO_ACTION', severity: 'CRITICAL', message: 'Задержка без ответственного или Next Action' });
         }
-        if (d.action_deadline && new Date(d.action_deadline).getTime() < now) {
-          violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'ACTION_DEADLINE_EXPIRED', severity: 'WARNING', message: 'Истёк дедлайн по Next Action' });
-        }
       });
     }
 
     if (r.forecast_release && r.sla_deadline && new Date(r.forecast_release).getTime() > new Date(r.sla_deadline).getTime()) {
-      violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'FORECAST_EXCEEDS_SLA', severity: 'WARNING', message: 'Прогноз выпуска превышает норматив SLA' });
+      violations.push({ repair_id: r.repair_id, wagon_number: wagonNum, code: 'FORECAST_EXCEEDS_SLA', severity: 'WARNING', message: 'Прогноз выпуска превышает норматив SLA договора' });
     }
   });
 
@@ -100,21 +105,4 @@ export function calculateLostWagonDays(delays: any[]): { totalDays: number; byCa
   });
 
   return { totalDays: Number((totalHours / 24).toFixed(1)), byCategory };
-}
-
-export function calculatePercentiles(numbers: number[]): { median: number; p80: number; p90: number } {
-  if (numbers.length === 0) return { median: 0, p80: 0, p90: 0 };
-  const sorted = [...numbers].sort((a, b) => a - b);
-  const getQuantile = (q: number) => {
-    const pos = (sorted.length - 1) * q;
-    const base = Math.floor(pos);
-    const rest = pos - base;
-    return sorted[base + 1] !== undefined ? sorted[base] + rest * (sorted[base + 1] - sorted[base]) : sorted[base];
-  };
-
-  return {
-    median: Number(getQuantile(0.5).toFixed(1)),
-    p80: Number(getQuantile(0.8).toFixed(1)),
-    p90: Number(getQuantile(0.9).toFixed(1))
-  };
 }

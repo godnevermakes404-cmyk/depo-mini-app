@@ -3,7 +3,8 @@ import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import { 
   STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
-  runDataQualityChecks, calculateLostWagonDays, type DQViolation 
+  runDataQualityChecks, calculateLostWagonDays, 
+  type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
 import './App.css';
 
@@ -17,8 +18,7 @@ const DOCUMENT_TYPES = [
   'АКТ ВУ-22 (Дефектная ведомость)',
   'Справка 2612',
   'Справка 2602',
-  'Акт дефектации',
-  'ВУ-36М (Акт приёмки)'
+  'Акт дефектации'
 ];
 
 export default function App() {
@@ -32,6 +32,7 @@ export default function App() {
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
   const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [selectedMetrics, setSelectedMetrics] = useState<RepairTimeMetrics | null>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [documents, setDocuments] = useState<any[]>([]);
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
@@ -50,7 +51,6 @@ export default function App() {
   const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
   const [owner, setOwner] = useState('ПРОМТРАНС');
-  const [ownerType, setOwnerType] = useState('Own');
 
   const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
@@ -86,6 +86,7 @@ export default function App() {
     const { data: repairData, error: repairErr } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
         input_defects, material_usage, shop_progress, signatures,
+        contracts ( customer_name, sla_hours ),
         wagons ( wagon_number, wagon_type, owner, owner_type )
       `).order('created_at', { ascending: false });
 
@@ -105,6 +106,28 @@ export default function App() {
     vibrate('light');
     setSelectedCase(item);
     
+    // Загрузка метрик времени из SQL View
+    const { data: timeMetrics } = await supabase
+      .from('v_repair_time_metrics')
+      .select('*')
+      .eq('repair_id', item.repair_id)
+      .maybeSingle();
+
+    if (timeMetrics) {
+      const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
+      const paused = Math.max(0, Number(timeMetrics.paused_hours || 0));
+      setSelectedMetrics({
+        total_dwell_hours: Number(Number(timeMetrics.total_dwell_hours || 0).toFixed(1)),
+        queue_hours: Number(Number(timeMetrics.queue_hours || 0).toFixed(1)),
+        gross_repair_hours: Number(gross.toFixed(1)),
+        paused_hours: Number(paused.toFixed(1)),
+        net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
+      });
+    } else {
+      setSelectedMetrics(null);
+    }
+
+    // Загрузка событий
     const { data: events } = await supabase
       .from('status_events')
       .select('*, users(name, role)')
@@ -112,6 +135,7 @@ export default function App() {
       .order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
 
+    // Загрузка документов
     const { data: docs } = await supabase
       .from('documents')
       .select('*')
@@ -174,7 +198,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Атомарная вызов-процедура для задержки
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) {
       alert('Заполните причину, ответственного и следующее действие (Next Action)!');
@@ -196,7 +219,7 @@ export default function App() {
     });
 
     if (error) {
-      alert('Ошибка регистрации задержки (БД блокировка): ' + error.message);
+      alert('Ошибка регистрации задержки: ' + error.message);
     } else {
       setShowDelayModal(false);
       setSelectedCase(null);
@@ -206,7 +229,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Атомарный вызов-процедура для создания ремонта
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите корректный 8-значный номер вагона!');
@@ -233,14 +255,14 @@ export default function App() {
   }
 
   function exportToCSV() {
-    const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'Owner Type', 'SLA Deadline'];
+    const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'SLA Deadline', 'Forecast Release'];
     const rows = filteredRepairs.map(r => [
       r.wagons?.wagon_number,
       STATUS_RU[r.current_status] || r.current_status,
       r.repair_type,
       r.wagons?.owner,
-      r.wagons?.owner_type,
-      r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''
+      r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : '',
+      r.forecast_release ? new Date(r.forecast_release).toLocaleString() : ''
     ]);
 
     const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
@@ -258,6 +280,10 @@ export default function App() {
   const lostWagonDays = calculateLostWagonDays(delayLogs);
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
 
+  // Расчёт контрольных рисков для Диспетчера
+  const readyNotDispatched = repairs.filter(r => r.current_status === '11 READY_TO_DISPATCH');
+  const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
+
   return (
     <div>
       <header className="brand-header">
@@ -268,20 +294,25 @@ export default function App() {
       <div className="content-area">
         {currentTab === 'home' && (
           <>
-            {dqViolations.length > 0 && (
+            {/* Блок исключений (Management by Exception) */}
+            {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
-                <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания ({dqViolations.length})</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                  {forecastBreaches.length > 0 && (
+                    <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг. (Прогноз > SLA)</div>
+                  )}
+                  {readyNotDispatched.length > 0 && (
+                    <div><b>🚂 Ожидают отправки:</b> {readyNotDispatched.length} ваг. (Готовы к выпуску)</div>
+                  )}
                   {dqViolations.map((v, i) => (
-                    <div key={i} style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}>
-                      <span><b>Вагон №{v.wagon_number}</b>: {v.message}</span>
-                    </div>
+                    <div key={i}><b>Вагон №{v.wagon_number}:</b> {v.message}</div>
                   ))}
                 </div>
               </div>
             )}
 
-            <h3 style={{ margin: '12px 0', fontSize: '16px' }}>На территории: {onSiteRepairs.length}</h3>
+            <h3 style={{ margin: '12px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length}</h3>
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter('04 QUEUE'); setCurrentTab('wagons'); }}>
                 <span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span>
@@ -297,7 +328,7 @@ export default function App() {
               </div>
               <div className="stat-box" onClick={() => { setStatusFilter('11 READY_TO_DISPATCH'); setCurrentTab('wagons'); }}>
                 <span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === '11 READY_TO_DISPATCH').length}</span>
+                <span className="stat-value">{readyNotDispatched.length}</span>
               </div>
             </div>
 
@@ -320,18 +351,23 @@ export default function App() {
               </div>
             </div>
 
-            {filteredRepairs.map((item: any) => (
-              <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
-                  <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
+            {filteredRepairs.map((item: any) => {
+              const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
+              return (
+                <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
+                    <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{item.repair_type} • {item.wagons?.owner}</span>
+                    <span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>
+                      {isBreached ? '⚠️ Риск SLA' : item.wagons?.owner_type}
+                    </span>
+                  </div>
                 </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{item.repair_type} • {item.wagons?.owner}</span>
-                  <span>{item.wagons?.owner_type}</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
 
             <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
           </>
@@ -386,7 +422,6 @@ export default function App() {
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option></select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>ТОР</option><option>ДР</option><option>КР</option><option>КРП</option></select>
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
-            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
               <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Создать</button>
@@ -404,12 +439,30 @@ export default function App() {
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
                 <span className="status-pill" style={{ color: 'var(--brand-color)' }}>
-                  Текущий: {STATUS_RU[selectedCase.current_status] || selectedCase.current_status}
+                  {STATUS_RU[selectedCase.current_status] || selectedCase.current_status}
                 </span>
               </div>
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
+            {/* Блок модели времени (Time Model) */}
+            {selectedMetrics && (
+              <div className="premium-card">
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Модель времени (Time Model)</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
+                  <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div>
+                  <div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
+                  <div>Грязный ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div>
+                  <div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
+                </div>
+                <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Чистый ремонт (Net):</span>
+                  <b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b>
+                </div>
+              </div>
+            )}
+
+            {/* Допустимые действия по State Machine */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
               {availableTransitions.length === 0 ? (
@@ -438,6 +491,7 @@ export default function App() {
               )}
             </div>
 
+            {/* Блок документов и актов */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
                 📄 Документы и Акты
@@ -464,6 +518,7 @@ export default function App() {
               </div>
             </div>
 
+            {/* Журнал событий */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -487,6 +542,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Модалка задержки */}
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
