@@ -11,6 +11,15 @@ declare global { interface Window { Telegram: any; } }
 
 type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 
+const DOCUMENT_TYPES = [
+  'АКТ ВУ-23 (Ремонт завершен)',
+  'АКТ ВУ-22 (Дефектная ведомость)',
+  'Справка 2612',
+  'Справка 2602',
+  'Акт дефектации',
+  'ВУ-36М (Акт приёмки)'
+];
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
@@ -23,6 +32,9 @@ export default function App() {
   
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
+  const [docNumber, setDocNumber] = useState('');
   const [loading, setLoading] = useState(false);
 
   const [showDelayModal, setShowDelayModal] = useState(false);
@@ -64,7 +76,7 @@ export default function App() {
         setUser(newUser);
       }
     } else {
-      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Разработчик', role: 'ADMIN' });
+      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир (Диспетчер)', role: 'DISPATCHER' });
     }
     loadData();
   }
@@ -91,8 +103,51 @@ export default function App() {
   async function openCaseDetails(item: any) {
     vibrate('light');
     setSelectedCase(item);
-    const { data: events } = await supabase.from('status_events').select('*').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
+    
+    // Загрузка журнала событий с автором
+    const { data: events } = await supabase
+      .from('status_events')
+      .select('*, users(name, role)')
+      .eq('repair_id', item.repair_id)
+      .order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
+
+    // Загрузка прикрепленных документов
+    const { data: docs } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('repair_id', item.repair_id)
+      .order('created_at', { ascending: false });
+    setDocuments(docs || []);
+  }
+
+  async function handleAddDocument() {
+    if (!docNumber.trim() || !selectedCase) {
+      alert('Введите номер документа!');
+      return;
+    }
+    setLoading(true);
+    vibrate('light');
+
+    const { error } = await supabase.from('documents').insert([{
+      repair_id: selectedCase.repair_id,
+      doc_type: docType,
+      doc_number: docNumber,
+      doc_date: new Date().toISOString().split('T')[0]
+    }]);
+
+    if (error) {
+      alert('Ошибка прикрепления документа: ' + error.message);
+    } else {
+      setDocNumber('');
+      const { data: docs } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('repair_id', selectedCase.repair_id)
+        .order('created_at', { ascending: false });
+      setDocuments(docs || []);
+    }
+    setLoading(false);
   }
 
   async function handleUpdateStatus(newStatus: string) {
@@ -340,6 +395,7 @@ export default function App() {
         </button>
       </nav>
 
+      {/* Модалка: Регистрация вагона */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -357,6 +413,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Модалка: Карточка вагона */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
@@ -371,6 +428,7 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
+            {/* Допустимые действия по State Machine */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
               {availableTransitions.length === 0 ? (
@@ -386,13 +444,61 @@ export default function App() {
               )}
             </div>
 
+            {/* Блок документов и актов */}
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
+                📄 Документы и Акты
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                {documents.length === 0 ? (
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Нет прикрепленных документов</span>
+                ) : (
+                  documents.map((d: any) => (
+                    <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
+                      <span><b>{d.doc_type}</b> №{d.doc_number}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>
+                  {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                </select>
+                <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+                <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
+              </div>
+            </div>
+
+            {/* Блок ответственных лиц */}
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
+                👨‍🔧 Ответственные лица
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px' }}>
+                <div><b>Диспетчер:</b> {user?.name || 'Владимир'}</div>
+                <div><b>Мастер цеха:</b> Иванов И.И.</div>
+                <div><b>Приёмщик ВК:</b> Сидоров С.С.</div>
+              </div>
+            </div>
+
+            {/* Журнал событий с выводом автора */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {statusHistory.map((ev: any) => (
-                  <div key={ev.event_id} style={{ fontSize: '10px', padding: '4px', background: 'var(--bg-color)', borderRadius: '4px' }}>
-                    <b>{STATUS_RU[ev.new_status] || ev.new_status}</b> • {new Date(ev.event_datetime).toLocaleString()}
-                    {ev.comment && <div style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>{ev.comment}</div>}
+                  <div key={ev.event_id || ev.event_datetime} style={{ fontSize: '10px', padding: '6px', background: 'var(--bg-color)', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                      <span>{STATUS_RU[ev.new_status] || ev.new_status}</span>
+                      <span style={{ color: 'var(--brand-color)', fontWeight: 'normal' }}>
+                        👤 {ev.users?.name || user?.name || 'Диспетчер'}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px' }}>
+                      {new Date(ev.event_datetime).toLocaleString()}
+                    </div>
+                    {ev.comment && <div style={{ fontStyle: 'italic', marginTop: '2px', color: 'var(--text-main)' }}>{ev.comment}</div>}
                   </div>
                 ))}
               </div>
@@ -401,6 +507,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Модалка задержки */}
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
