@@ -1,385 +1,368 @@
 import { useEffect, useState } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
+import { 
+  ALL_STATUSES, STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
+  runDataQualityChecks, calculateLostWagonDays, calculatePercentiles, DQViolation 
+} from './depoEngine';
 import './App.css';
 
 declare global { interface Window { Telegram: any; } }
 
-const STATUSES = ['01 PLANNED', '02 ARRIVED', '04 QUEUE', '07 IN_REPAIR', '08 REPAIR_PAUSED', '12 REPAIR_DONE', '15 DEPARTED'];
-
-const STATUS_MAP: Record<string, string> = {
-  '01 PLANNED': 'Запланирован',
-  '02 ARRIVED': 'Прибыл',
-  '04 QUEUE': 'В очереди',
-  '07 IN_REPAIR': 'В ремонте',
-  '08 REPAIR_PAUSED': 'Задержка',
-  '12 REPAIR_DONE': 'Отремонтирован',
-  '15 DEPARTED': 'Отправлен'
-};
-
-const DELAY_CATEGORIES = ['Materials', 'Customer', 'Railway', 'Internal', 'Technical', 'External'];
-const DOCUMENT_TYPES = ['Справка 2612', 'Справка 2602', 'Акт осмотра', 'ВУ-23М', 'ВУ-22', 'ВУ-36М', 'Паспорт вагона'];
-const SLA_HOURS: Record<string, number> = { 'ТОР': 24, 'ДР': 72, 'КР': 120, 'КРП': 144, 'Модернизация': 168 };
-const SHOPS = [
-  { id: 'telezhka', name: '🛠️ Тележечный цех' },
-  { id: 'kolesa', name: '⚙️ Колёсный цех' },
-  { id: 'malyarka', name: '🎨 Малярный цех' },
-  { id: 'sborka', name: '🔩 Сборка и испытания' }
-];
-
-type UserRole = 'Dispatcher' | 'Master' | 'Inspector' | 'Customer';
 type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 
 export default function App() {
-  const [user, setUser] = useState<{ name: string; role: UserRole; telegram_id?: number } | null>(null);
+  const [user, setUser] = useState<any>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [showAddModal, setShowAddModal] = useState(false);
-  
-  const [selectedCase, setSelectedCase] = useState<any>(null);
-  const [shopProgress, setShopProgress] = useState<Record<string, boolean>>({ telezhka: false, kolesa: false, malyarka: false, sborka: false });
-  const [signatures, setSignatures] = useState<Record<string, boolean>>({ master: false, inspector: false, customer: false });
-  const [inputDefects, setInputDefects] = useState('');
-  const [materialUsage, setMaterialUsage] = useState('');
-  const [activeDelay, setActiveDelay] = useState<any>(null);
-  const [statusHistory, setStatusHistory] = useState<any[]>([]);
-  const [documents, setDocuments] = useState<any[]>([]);
-  
-  const [wagonNumber, setWagonNumber] = useState('');
-  const [wagonType, setWagonType] = useState('Полувагон');
-  const [ownerType, setOwnerType] = useState('Own');
-  const [repairType, setRepairType] = useState('ДР');
-  const [loading, setLoading] = useState(false);
-
-  const [showDelayModal, setShowDelayModal] = useState(false);
-  const [delayCategory, setDelayCategory] = useState('Materials');
-  const [delayCause, setDelayCause] = useState('');
-  const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
-  const [docNumber, setDocNumber] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const [repairs, setRepairs] = useState<any[]>([]);
   const [delayLogs, setDelayLogs] = useState<any[]>([]);
-  const [stats, setStats] = useState({ onSite: 0, inRepair: 0, inQueue: 0, blocked: 0 });
+  const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
+  
+  const [selectedCase, setSelectedCase] = useState<any>(null);
+  const [statusHistory, setStatusHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Форма задержки с Next Action
+  const [showDelayModal, setShowDelayModal] = useState(false);
+  const [delayCategory, setDelayCategory] = useState('Materials');
+  const [delayType, setDelayType] = useState<'PRIMARY' | 'SECONDARY'>('PRIMARY');
+  const [delayCause, setDelayCause] = useState('');
+  const [responsibleParty, setResponsibleParty] = useState('');
+  const [nextAction, setNextAction] = useState('');
+  const [actionDeadline, setActionDeadline] = useState('');
+
+  // Форма регистрации вагона
+  const [wagonNumber, setWagonNumber] = useState('');
+  const [wagonType, setWagonType] = useState('Полувагон');
+  const [repairType, setRepairType] = useState('ДР');
+  const [owner, setOwner] = useState('ПРОМТРАНС');
+  const [ownerType, setOwnerType] = useState('Own');
 
   const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
-    try { if (window.Telegram?.WebApp?.HapticFeedback) window.Telegram.WebApp.HapticFeedback.impactOccurred(style); } catch (e) {}
+    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
   };
 
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
     let tgUser: any = null;
-    let userName = 'Неизвестный пользователь';
     try {
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
         tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color');
-        if (tg.initDataUnsafe?.user) {
-          tgUser = tg.initDataUnsafe.user;
-          userName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || userName;
-        }
+        tgUser = tg.initDataUnsafe?.user;
       }
     } catch (e) {}
 
     if (tgUser?.id) {
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
       if (dbUser) {
-        setUser({ name: dbUser.name || userName, role: (dbUser.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
+        setUser(dbUser);
       } else {
-        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: userName, role: 'Dispatcher' }]).select().maybeSingle();
-        setUser({ name: userName, role: (newUser?.role as UserRole) || 'Dispatcher', telegram_id: tgUser.id });
+        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'PENDING' }]).select().single();
+        setUser(newUser);
       }
     } else {
-      setUser({ name: 'Разработчик', role: 'Dispatcher' });
+      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Разработчик', role: 'ADMIN' });
     }
     loadData();
   }
 
   async function loadData() {
-    const { data } = await supabase.from('repair_cases').select(`
-        repair_id, current_status, repair_type, created_at, sla_deadline, updated_at, shop_progress, signatures, input_defects, material_usage,
-        wagons ( wagon_number, wagon_type, owner_type )
+    const { data: repairData } = await supabase.from('repair_cases').select(`
+        repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
+        input_defects, material_usage, shop_progress, signatures,
+        wagons ( wagon_number, wagon_type, owner, owner_type )
       `).order('created_at', { ascending: false });
 
-    if (data) {
-      setRepairs(data);
-      setStats({
-        onSite: data.length,
-        inRepair: data.filter((d: any) => d.current_status === '07 IN_REPAIR').length,
-        inQueue: data.filter((d: any) => d.current_status === '04 QUEUE' || d.current_status === '01 PLANNED').length,
-        blocked: data.filter((d: any) => d.current_status === '08 REPAIR_PAUSED').length
-      });
-    }
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
-    if (delays) setDelayLogs(delays);
+
+    if (repairData && delays) {
+      setRepairs(repairData);
+      setDelayLogs(delays);
+      setDqViolations(runDataQualityChecks(repairData, delays));
+    }
   }
 
   async function openCaseDetails(item: any) {
     vibrate('light');
     setSelectedCase(item);
-    setShopProgress(item.shop_progress || { telezhka: false, kolesa: false, malyarka: false, sborka: false });
-    setSignatures(item.signatures || { master: false, inspector: false, customer: false });
-    setInputDefects(item.input_defects || '');
-    setMaterialUsage(item.material_usage || '');
-    
-    if (item.current_status === '08 REPAIR_PAUSED') {
-      const { data: delay } = await supabase.from('delay_log').select('*').eq('repair_id', item.repair_id).is('end_datetime', null).order('start_datetime', { ascending: false }).maybeSingle();
-      setActiveDelay(delay);
-    } else { setActiveDelay(null); }
-
-    const { data: events } = await supabase.from('status_events').select('*').eq('repair_id', item.repair_id).order('recorded_datetime', { ascending: false });
+    const { data: events } = await supabase.from('status_events').select('*').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
-
-    const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
-    if (docs) setDocuments(docs);
   }
 
-  const canEditOps = user?.role === 'Dispatcher' || user?.role === 'Master';
-  const canSignMaster = user?.role === 'Dispatcher' || user?.role === 'Master';
-  const canSignInspector = user?.role === 'Dispatcher' || user?.role === 'Inspector';
-  const canSignCustomer = user?.role === 'Dispatcher' || user?.role === 'Customer';
-
-  async function handleToggleShop(shopId: string) {
-    if (!canEditOps || !selectedCase) return;
-    vibrate('medium');
-    const newProgress = { ...shopProgress, [shopId]: !shopProgress[shopId] };
-    setShopProgress(newProgress);
-    await supabase.from('repair_cases').update({ shop_progress: newProgress }).eq('repair_id', selectedCase.repair_id);
-    const shopName = SHOPS.find(s => s.id === shopId)?.name;
-    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status, comment: `Цех: ${shopName} - ${newProgress[shopId] ? 'выполнен' : 'отменен'} [${user?.name}]` }]);
-    loadData();
-  }
-
-  async function handleToggleSignature(sigKey: 'master' | 'inspector' | 'customer') {
+  // Смена статуса через безопасную функцию в Supabase
+  async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
-    if (sigKey === 'master' && !canSignMaster) { alert('Только Мастер!'); return; }
-    if (sigKey === 'inspector' && !canSignInspector) { alert('Только Приёмщик!'); return; }
-    if (sigKey === 'customer' && !canSignCustomer) { alert('Только Заказчик!'); return; }
+    if (newStatus === '08 REPAIR_PAUSED') {
+      setShowDelayModal(true);
+      return;
+    }
 
     vibrate('medium');
-    const newSigs = { ...signatures, [sigKey]: !signatures[sigKey] };
-    setSignatures(newSigs);
-    await supabase.from('repair_cases').update({ signatures: newSigs }).eq('repair_id', selectedCase.repair_id);
-    const sigNames: Record<string, string> = { master: 'Мастер цеха', inspector: 'Приёмщик ВК', customer: 'Представитель Заказчика' };
-    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: selectedCase.current_status, comment: `ВУ-36М: ${sigNames[sigKey]} ${newSigs[sigKey] ? 'подписал' : 'отозвал'} [${user?.name}]` }]);
+    setLoading(true);
+    const { error } = await supabase.rpc('change_repair_status', {
+      p_repair_id: selectedCase.repair_id,
+      p_new_status: newStatus,
+      p_user_id: user?.id,
+      p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}`
+    });
 
-    if (newSigs.master && newSigs.inspector && newSigs.customer) {
-      const autoDocNum = `36M-${selectedCase.wagons?.wagon_number}`;
-      await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: 'ВУ-36М', doc_number: autoDocNum, doc_date: new Date().toISOString().split('T')[0] }]);
-      vibrate('heavy'); alert(`ВУ-36М № ${autoDocNum} сформирован.`); openCaseDetails(selectedCase);
+    if (error) {
+      alert('Ошибка перевода статуса: ' + error.message);
+    } else {
+      setSelectedCase(null);
+      loadData();
     }
-    loadData();
+    setLoading(false);
   }
 
+  // Добавление задержки с обязательным Next Action
+  async function handleConfirmDelay() {
+    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) {
+      alert('Заполните причину, ответственного и следующее действие (Next Action)!');
+      return;
+    }
+
+    setLoading(true);
+    vibrate('heavy');
+
+    // 1. Создание задержки
+    await supabase.from('delay_log').insert([{
+      repair_id: selectedCase.repair_id,
+      category: delayCategory,
+      delay_type: delayType,
+      cause: delayCause,
+      responsible_party: responsibleParty,
+      next_action: nextAction,
+      action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null,
+      start_datetime: new Date().toISOString()
+    }]);
+
+    // 2. Перевод в REPAIR_PAUSED
+    await supabase.rpc('change_repair_status', {
+      p_repair_id: selectedCase.repair_id,
+      p_new_status: '08 REPAIR_PAUSED',
+      p_user_id: user?.id,
+      p_comment: `Задержка [${delayCategory}]: ${delayCause}`
+    });
+
+    setShowDelayModal(false);
+    setSelectedCase(null);
+    setDelayCause(''); setNextAction(''); setResponsibleParty('');
+    loadData();
+    setLoading(false);
+  }
+
+  // Регистрация вагона
   async function handleCreateRepair() {
-    if (!canEditOps || !wagonNumber.trim()) return;
-    vibrate('light'); setLoading(true);
+    if (!wagonNumber.trim() || wagonNumber.length !== 8) {
+      alert('Введите корректный 8-значный номер вагона!');
+      return;
+    }
+
+    setLoading(true);
     try {
       let wagonId: string | null = null;
       const { data: existingWagon } = await supabase.from('wagons').select('id').eq('wagon_number', wagonNumber).maybeSingle();
-      if (existingWagon) wagonId = existingWagon.id;
-      else { const { data: w } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner_type: ownerType }]).select().single(); wagonId = w?.id; }
-      
-      const slaDeadline = new Date(Date.now() + (SLA_HOURS[repairType] || 72) * 60 * 60 * 1000).toISOString();
-      const { data: rCase } = await supabase.from('repair_cases').insert([{ wagon_id: wagonId, repair_type: repairType, current_status: '01 PLANNED', sla_deadline: slaDeadline, shop_progress: { telezhka: false, kolesa: false, malyarka: false, sborka: false }, signatures: { master: false, inspector: false, customer: false } }]).select().single();
-      
-      await supabase.from('status_events').insert([{ repair_id: rCase.repair_id, new_status: '01 PLANNED', comment: `Регистрация (${user?.name})` }]);
+      if (existingWagon) {
+        wagonId = existingWagon.id;
+      } else {
+        const { data: w } = await supabase.from('wagons').insert([{ wagon_number: wagonNumber, wagon_type: wagonType, owner, owner_type: ownerType }]).select().single();
+        wagonId = w?.id;
+      }
+
+      const { data: rCase, error } = await supabase.from('repair_cases').insert([{
+        wagon_id: wagonId,
+        repair_type: repairType,
+        current_status: '01 PLANNED',
+        sla_deadline: new Date(Date.now() + 72 * 3600 * 1000).toISOString()
+      }]).select().single();
+
+      if (error) throw error;
+
+      await supabase.rpc('change_repair_status', {
+        p_repair_id: rCase.repair_id,
+        p_new_status: '01 PLANNED',
+        p_user_id: user?.id,
+        p_comment: 'Регистрация вагона в системе'
+      });
+
       setWagonNumber(''); setShowAddModal(false); loadData();
-    } finally { setLoading(false); }
-  }
-
-  async function handleUpdateStatus(newStatus: string) {
-    if (!canEditOps || !selectedCase) return;
-    if (newStatus === '08 REPAIR_PAUSED') { setShowDelayModal(true); return; }
-    vibrate('light'); setLoading(true);
-    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: newStatus, comment: `Смена статуса [${user?.name}]` }]);
-    await supabase.from('repair_cases').update({ current_status: newStatus, updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
-    setSelectedCase(null); loadData(); setLoading(false);
-  }
-
-  async function handleAddDocument() {
-    if (!canEditOps || !docNumber.trim() || !selectedCase) return;
-    setLoading(true);
-    await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0] }]);
-    setDocNumber(''); openCaseDetails(selectedCase); setLoading(false);
-  }
-
-  async function handleConfirmDelay() {
-    if (!canEditOps || !delayCause.trim()) return;
-    setLoading(true);
-    await supabase.from('delay_log').insert([{ repair_id: selectedCase.repair_id, category: delayCategory, cause: delayCause, start_datetime: new Date().toISOString() }]);
-    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: selectedCase.current_status, new_status: '08 REPAIR_PAUSED', comment: `Задержка: ${delayCause}` }]);
-    await supabase.from('repair_cases').update({ current_status: '08 REPAIR_PAUSED', updated_at: new Date().toISOString() }).eq('repair_id', selectedCase.repair_id);
-    setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); loadData(); setLoading(false);
-  }
-
-  async function handleUnblockRepair() {
-    if (!canEditOps || !selectedCase) return;
-    setLoading(true);
-    const now = new Date().toISOString();
-    await supabase.from('delay_log').update({ end_datetime: now }).eq('repair_id', selectedCase.repair_id).is('end_datetime', null);
-    await supabase.from('status_events').insert([{ repair_id: selectedCase.repair_id, previous_status: '08 REPAIR_PAUSED', new_status: '07 IN_REPAIR', comment: `Задержка снята` }]);
-    await supabase.from('repair_cases').update({ current_status: '07 IN_REPAIR', updated_at: now }).eq('repair_id', selectedCase.repair_id);
-    setSelectedCase(null); loadData(); setLoading(false);
-  }
-  
-  async function handleSaveTechData() {
-    if (!canEditOps || !selectedCase) return;
-    setLoading(true);
-    await supabase.from('repair_cases').update({ input_defects: inputDefects, material_usage: materialUsage }).eq('repair_id', selectedCase.repair_id);
-    vibrate('light'); setLoading(false); loadData();
-  }
-
-  function getSlaBadge(deadline: string) {
-    if (!deadline) return null;
-    const diffHours = (new Date(deadline).getTime() - Date.now()) / (1000 * 60 * 60);
-    if (diffHours < 0) return <span style={{ color: 'var(--danger)', fontWeight: 'bold' }}>⚠️ Просрочен</span>;
-    return <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>⏱ {Math.round(diffHours)} ч</span>;
-  }
-
-  const renderContent = () => {
-    switch (currentTab) {
-      case 'home':
-        return (
-          <>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '18px' }}>Сводка</h3>
-            <div className="stats-grid">
-              <div className="stat-box"><span className="stat-label">Вагонов</span><span className="stat-value">{stats.onSite}</span></div>
-              <div className="stat-box"><span className="stat-label" style={{color: 'var(--brand-color)'}}>В ремонте</span><span className="stat-value" style={{color: 'var(--brand-color)'}}>{stats.inRepair}</span></div>
-              <div className="stat-box"><span className="stat-label" style={{color: 'var(--warning)'}}>В очереди</span><span className="stat-value" style={{color: 'var(--warning)'}}>{stats.inQueue}</span></div>
-              <div className="stat-box"><span className="stat-label" style={{color: 'var(--danger)'}}>Задержано</span><span className="stat-value" style={{color: 'var(--danger)'}}>{stats.blocked}</span></div>
-            </div>
-            
-            <h3 style={{ margin: '18px 0 12px 0', fontSize: '18px' }}>Быстрые действия</h3>
-            <div className="premium-card" onClick={() => {vibrate('light'); setCurrentTab('wagons');}} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-              <div style={{ background: 'var(--brand-color)', color: '#fff', width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>🚆</div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '15px' }}>Управление вагонами</h4>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Реестр, статусы, цехи</span>
-              </div>
-            </div>
-            <div className="premium-card" onClick={() => {vibrate('light'); setCurrentTab('analytics');}} style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
-              <div style={{ background: 'var(--success)', color: '#fff', width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>📊</div>
-              <div>
-                <h4 style={{ margin: 0, fontSize: '15px' }}>Отчёты и аналитика</h4>
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Выпуск за месяц, задержки</span>
-              </div>
-            </div>
-          </>
-        );
-
-      case 'wagons':
-        return (
-          <>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '18px' }}>Реестр вагонов</h3>
-            {repairs.length === 0 ? <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '30px' }}>Вагонов пока нет</p> : repairs.map((item: any) => {
-              const isPaused = item.current_status === '08 REPAIR_PAUSED';
-              return (
-                <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isPaused ? '4px solid var(--danger)' : 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                    <span style={{ fontSize: '16px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
-                    <span className="status-pill" style={{ color: isPaused ? 'var(--danger)' : 'var(--brand-color)' }}>
-                      {STATUS_MAP[item.current_status] || item.current_status}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)' }}>
-                    <span>{item.repair_type} ({item.wagons?.wagon_type})</span>
-                    {getSlaBadge(item.sla_deadline)}
-                  </div>
-                </div>
-              );
-            })}
-            
-            {canEditOps && (
-              <button className="fab" onClick={() => {vibrate('medium'); setShowAddModal(true);}}>+</button>
-            )}
-          </>
-        );
-
-      case 'analytics':
-        const currentMonth = new Date().getMonth();
-        const monthlyReleases = repairs.filter((c: any) => (c.current_status === '12 REPAIR_DONE' || c.current_status === '15 DEPARTED') && new Date(c.updated_at).getMonth() === currentMonth);
-        const delayStats = DELAY_CATEGORIES.map(cat => ({ category: cat, count: delayLogs.filter((d: any) => d.category === cat).length }));
-        return (
-          <>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '18px' }}>Аналитика</h3>
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>Выпуск за текущий месяц: <b style={{color: 'var(--success)'}}>{monthlyReleases.length}</b></h4>
-            </div>
-            
-            <h4 style={{ margin: '16px 0 10px 0', fontSize: '15px' }}>Причины задержек</h4>
-            <div className="premium-card">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {delayStats.map(stat => (
-                  <div key={stat.category}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight:'600', marginBottom: '4px' }}>
-                      <span>{stat.category}</span><span>{stat.count}</span>
-                    </div>
-                    <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px', overflow: 'hidden' }}>
-                      <div style={{ width: delayLogs.length > 0 ? `${(stat.count / delayLogs.length) * 100}%` : '0%', background: 'var(--danger)', height: '100%', borderRadius:'3px' }} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
-        );
-
-      case 'profile':
-        return (
-          <>
-            <div style={{ textAlign: 'center', margin: '20px 0' }}>
-              <div style={{ width: '64px', height: '64px', background: 'var(--brand-color)', color: 'white', borderRadius: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '26px', margin: '0 auto 12px auto', fontWeight: 'bold' }}>
-                {user?.name.charAt(0)}
-              </div>
-              <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <span className="status-pill" style={{ color: 'var(--brand-color)' }}>{user?.role}</span>
-            </div>
-            <div className="premium-card">
-              <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
-                Авторизован через Telegram.<br/>ID: {user?.telegram_id}
-              </p>
-            </div>
-          </>
-        );
+    } catch (err: any) {
+      alert('Ошибка создания (возможно, у вагона уже есть активный ремонт): ' + err.message);
+    } finally {
+      setLoading(false);
     }
-  };
+  }
+
+  // Экспорт реестра в CSV (Excel)
+  function exportToCSV() {
+    const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'Owner Type', 'SLA Deadline'];
+    const rows = filteredRepairs.map(r => [
+      r.wagons?.wagon_number,
+      STATUS_RU[r.current_status] || r.current_status,
+      r.repair_type,
+      r.wagons?.owner,
+      r.wagons?.owner_type,
+      r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `depo_wagons_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // Фильтрация
+  const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
+  const filteredRepairs = statusFilter ? repairs.filter(r => r.current_status === statusFilter) : repairs;
+  const lostWagonDays = calculateLostWagonDays(delayLogs);
+
+  // Доступные переходы для текущей карточки
+  const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
 
   return (
     <div>
       <header className="brand-header">
-        <h1 className="brand-title">ДЕПО</h1>
-        <div style={{ width: '28px', height: '28px', background: 'var(--bg-color)', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px' }}>🔔</div>
+        <h1 className="brand-title">ДЕПО TMS</h1>
+        <span className="status-pill">{user?.role || 'PENDING'}</span>
       </header>
 
       <div className="content-area">
-        {renderContent()}
+        {currentTab === 'home' && (
+          <>
+            {/* Блок Management by Exception */}
+            {dqViolations.length > 0 && (
+              <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
+                <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания ({dqViolations.length})</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {dqViolations.map((v, i) => (
+                    <div key={i} style={{ fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}>
+                      <span><b>Вагон №{v.wagon_number}</b>: {v.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Сводка с кликабельным Drill-down */}
+            <h3 style={{ margin: '12px 0', fontSize: '16px' }}>На территории: {onSiteRepairs.length}</h3>
+            <div className="stats-grid">
+              <div className="stat-box" onClick={() => { setStatusFilter('04 QUEUE'); setCurrentTab('wagons'); }}>
+                <span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === '04 QUEUE').length}</span>
+              </div>
+              <div className="stat-box" onClick={() => { setStatusFilter('07 IN_REPAIR'); setCurrentTab('wagons'); }}>
+                <span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === '07 IN_REPAIR').length}</span>
+              </div>
+              <div className="stat-box" onClick={() => { setStatusFilter('08 REPAIR_PAUSED'); setCurrentTab('wagons'); }}>
+                <span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === '08 REPAIR_PAUSED').length}</span>
+              </div>
+              <div className="stat-box" onClick={() => { setStatusFilter('11 READY_TO_DISPATCH'); setCurrentTab('wagons'); }}>
+                <span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === '11 READY_TO_DISPATCH').length}</span>
+              </div>
+            </div>
+
+            {/* Метрика Lost Wagon-Days */}
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 4px 0', fontSize: '13px' }}>Потери: <b>{lostWagonDays.totalDays} wagon-days</b></h4>
+              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Рассчитано только по PRIMARY задержкам</span>
+            </div>
+          </>
+        )}
+
+        {currentTab === 'wagons' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px' }}>
+                {statusFilter ? `Фильтр: ${STATUS_RU[statusFilter]}` : 'Все вагоны'}
+              </h3>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {statusFilter && <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setStatusFilter(null)}>Сброс</button>}
+                <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
+              </div>
+            </div>
+
+            {filteredRepairs.map((item: any) => (
+              <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
+                  <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{item.repair_type} • {item.wagons?.owner}</span>
+                  <span>{item.wagons?.owner_type}</span>
+                </div>
+              </div>
+            ))}
+
+            <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
+          </>
+        )}
+
+        {currentTab === 'analytics' && (
+          <div className="premium-card">
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
+            {Object.entries(lostWagonDays.byCategory).map(([cat, days]) => (
+              <div key={cat} style={{ marginBottom: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
+                  <span><b>{cat}</b></span>
+                  <span>{days.toFixed(1)} вагон-дней</span>
+                </div>
+                <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}>
+                  <div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {currentTab === 'profile' && (
+          <div className="premium-card" style={{ textAlign: 'center' }}>
+            <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
+            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль: {user?.role}</p>
+          </div>
+        )}
       </div>
 
+      {/* Нижнее меню */}
       <nav className="bottom-nav">
-        <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => {vibrate('light'); setCurrentTab('home')}}>
+        <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
           <div className="nav-icon">🏠</div><span>Главная</span>
         </button>
-        <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => {vibrate('light'); setCurrentTab('wagons')}}>
+        <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}>
           <div className="nav-icon">🚆</div><span>Вагоны</span>
         </button>
-        <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => {vibrate('light'); setCurrentTab('analytics')}}>
+        <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}>
           <div className="nav-icon">📊</div><span>Аналитика</span>
         </button>
-        <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => {vibrate('light'); setCurrentTab('profile')}}>
+        <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}>
           <div className="nav-icon">👤</div><span>Профиль</span>
         </button>
       </nav>
 
-      {/* Модалка: Добавить вагон */}
+      {/* Модалка: Регистрация вагона */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '16px' }}>Регистрация вагона</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Регистрация вагона</h3>
             <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="Номер вагона (8 цифр)" />
-            <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Крытый</option></select>
+            <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option></select>
+            <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>ТОР</option><option>ДР</option><option>КР</option><option>КРП</option></select>
+            <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
-            <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>ТОР</option><option>ДР</option><option>КР</option></select>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
               <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Создать</button>
             </div>
@@ -387,119 +370,76 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка: Карточка вагона */}
+      {/* Модалка: Карточка вагона и Государственный автомат (State Machine) */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
             <div className="sheet-handle"></div>
-            
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div>
-                <h3 style={{ margin: '0 0 2px 0', fontSize: '18px', fontWeight: '800' }}>№ {selectedCase.wagons?.wagon_number}</h3>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  <b>{selectedCase.repair_type}</b> ({selectedCase.wagons?.wagon_type}) • {getSlaBadge(selectedCase.sla_deadline)}
-                </div>
+                <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
+                <span className="status-pill" style={{ color: 'var(--brand-color)' }}>
+                  Текущий: {STATUS_RU[selectedCase.current_status] || selectedCase.current_status}
+                </span>
               </div>
-              <button onClick={() => setSelectedCase(null)} style={{ background: 'var(--bg-color)', border: 'none', borderRadius: '14px', width: '28px', height: '28px', fontWeight: 'bold', color: 'var(--text-muted)', cursor: 'pointer' }}>✕</button>
+              <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* ЭТАП 1 */}
+            {/* Разрешенные переходы по State Machine */}
             <div className="premium-card">
-              <h4 style={{ margin: '0 0 10px 0', color: 'var(--brand-color)', fontSize: '13px' }}>1️⃣ Входной контроль</h4>
-              {canEditOps && (
-                <div style={{ display: 'flex', overflowX: 'auto', gap: '6px', paddingBottom: '6px', marginBottom: '8px' }}>
-                  {STATUSES.map(st => (
-                    <button key={st} disabled={st === selectedCase.current_status || loading} onClick={() => handleUpdateStatus(st)} 
-                      style={{ padding: '6px 12px', borderRadius: '16px', border: 'none', fontWeight: '600', fontSize: '11px', whiteSpace: 'nowrap', background: st === selectedCase.current_status ? 'var(--text-main)' : 'var(--bg-color)', color: st === selectedCase.current_status ? 'var(--card-bg)' : 'var(--text-main)' }}>
-                      {STATUS_MAP[st] || st}
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
+              {availableTransitions.length === 0 ? (
+                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Цепочка завершена</p>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {availableTransitions.map(st => (
+                    <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto' }}>
+                      → {STATUS_RU[st] || st}
                     </button>
                   ))}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '8px' }}>
-                <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>
-                  {DOCUMENT_TYPES.map(doc => (
-                    <option key={doc} value={doc}>{doc}</option>
-                  ))}
-                </select>
-                <input className="input-field" type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} style={{ margin: 0, flex: 0.8 }}/>
-                <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument}>+</button>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px' }}>
-                {documents.map((d: any) => (<span key={d.id} style={{ background: 'var(--bg-color)', padding: '4px 8px', borderRadius: '6px', fontSize: '11px' }}>📄 {d.doc_type} №{d.doc_number}</span>))}
-              </div>
-              <textarea className="textarea-field" disabled={!canEditOps} value={inputDefects} onChange={e => setInputDefects(e.target.value)} placeholder="Входные дефекты..." rows={2} style={{ marginTop: '6px' }} />
             </div>
 
-            {/* ЭТАП 2 */}
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 10px 0', color: 'var(--brand-color)', fontSize: '13px' }}>2️⃣ Цехи и Материалы</h4>
-              {SHOPS.map(shop => {
-                const isDone = !!shopProgress[shop.id];
-                return (
-                  <button key={shop.id} className={`list-btn ${isDone ? 'done' : ''}`} disabled={!canEditOps} onClick={() => handleToggleShop(shop.id)}>
-                    <span>{shop.name}</span>
-                    <span style={{ fontWeight: 'bold' }}>{isDone ? '✅ Готово' : '⏳ В ожидании'}</span>
-                  </button>
-                );
-              })}
-              <textarea className="textarea-field" disabled={!canEditOps} value={materialUsage} onChange={e => setMaterialUsage(e.target.value)} placeholder="Расход металла..." rows={2} style={{ marginTop: '6px' }} />
-              {canEditOps && <button className="btn-primary" style={{ marginTop: '8px', padding: '8px' }} onClick={handleSaveTechData}>💾 Сохранить данные</button>}
-            </div>
-
-            {/* ЭТАП 3 */}
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 10px 0', color: 'var(--brand-color)', fontSize: '13px' }}>3️⃣ Согласование ВУ-36М</h4>
-              <button className={`list-btn ${signatures.master ? 'done' : ''}`} disabled={!canSignMaster} onClick={() => handleToggleSignature('master')}>
-                <span>👨‍🔧 Мастер цеха</span>
-                <span style={{ fontWeight: 'bold' }}>{signatures.master ? '✅ Подписано' : '❌ Подписать'}</span>
-              </button>
-              <button className={`list-btn ${signatures.inspector ? 'done' : ''}`} disabled={!canSignInspector} onClick={() => handleToggleSignature('inspector')}>
-                <span>🕵️‍♂️ Приёмщик ВК</span>
-                <span style={{ fontWeight: 'bold' }}>{signatures.inspector ? '✅ Подписано' : '❌ Подписать'}</span>
-              </button>
-              <button className={`list-btn ${signatures.customer ? 'done' : ''}`} disabled={!canSignCustomer} onClick={() => handleToggleSignature('customer')}>
-                <span>🏢 Заказчик</span>
-                <span style={{ fontWeight: 'bold' }}>{signatures.customer ? '✅ Подписано' : '❌ Подписать'}</span>
-              </button>
-            </div>
-
-            {/* ИСТОРИЯ ИЗМЕНЕНИЙ */}
+            {/* Журнал событий */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {statusHistory.map((ev: any) => (
-                  <div key={ev.event_id || ev.recorded_datetime} style={{ background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
-                    <div style={{ fontWeight: 'bold' }}>{STATUS_MAP[ev.new_status] || ev.new_status}</div>
-                    <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{new Date(ev.recorded_datetime).toLocaleString()}</div>
-                    {ev.comment && <div style={{ marginTop: '2px', fontStyle: 'italic' }}>{ev.comment}</div>}
+                  <div key={ev.event_id} style={{ fontSize: '10px', padding: '4px', background: 'var(--bg-color)', borderRadius: '4px' }}>
+                    <b>{STATUS_RU[ev.new_status] || ev.new_status}</b> • {new Date(ev.event_datetime).toLocaleString()}
+                    {ev.comment && <div style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>{ev.comment}</div>}
                   </div>
                 ))}
               </div>
             </div>
-
-            {selectedCase.current_status === '08 REPAIR_PAUSED' && (
-              <div className="premium-card" style={{ border: '1px solid var(--danger)' }}>
-                <h4 style={{ margin: '0 0 6px 0', color: 'var(--danger)', fontSize: '13px' }}>⛔ Заблокировано</h4>
-                <p style={{ margin: '0 0 10px 0', fontSize: '12px' }}>{activeDelay?.cause}</p>
-                {canEditOps && <button className="btn-primary" style={{ background: 'var(--success)' }} onClick={handleUnblockRepair}>Снять задержку</button>}
-              </div>
-            )}
-            <div style={{ height: '30px' }}></div>
           </div>
         </div>
       )}
-      
-      {/* Модалка: Блокировка */}
+
+      {/* Модалка: Блокировка с Next Action */}
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 12px 0', color: 'var(--danger)', fontSize: '16px' }}>⛔ Блокировка ремонта</h3>
-            <select className="select-field" value={delayCategory} onChange={e => setDelayCategory(e.target.value)}>{DELAY_CATEGORIES.map(cat => <option key={cat}>{cat}</option>)}</select>
-            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={3} placeholder="Причина задержки" style={{ marginTop: '8px' }} />
-            <div style={{ display: 'flex', gap: '8px', marginTop: '18px' }}>
+            <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки (Blocker)</h3>
+            <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
+              <option value="PRIMARY">PRIMARY (Первичная - считается в Lost Days)</option>
+              <option value="SECONDARY">SECONDARY (Вторичная - накладывается)</option>
+            </select>
+            <select className="select-field" value={delayCategory} onChange={e => setDelayCategory(e.target.value)}>
+              <option value="Materials">Материалы / Запчасти</option>
+              <option value="Customer">Заказчик / Согласование</option>
+              <option value="Railway">ЖД / Маневры</option>
+              <option value="Internal">Внутренняя / Кадры</option>
+            </select>
+            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
+            <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
+            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action (Следующее действие)" />
+            <input className="input-field" type="datetime-local" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} />
+            
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
-              <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay}>Заблокировать</button>
+              <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button>
             </div>
           </div>
         </div>
