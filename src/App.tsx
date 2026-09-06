@@ -70,18 +70,21 @@ export default function App() {
   }
 
   async function loadData() {
-    const { data: repairData } = await supabase.from('repair_cases').select(`
+    const { data: repairData, error: repairErr } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
         input_defects, material_usage, shop_progress, signatures,
         wagons ( wagon_number, wagon_type, owner, owner_type )
       `).order('created_at', { ascending: false });
 
-    const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
+    if (repairErr) console.error("Ошибка загрузки ремонтов:", repairErr.message);
 
-    if (repairData && delays) {
+    const { data: delays, error: delayErr } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
+    if (delayErr) console.error("Ошибка загрузки задержек:", delayErr.message);
+
+    if (repairData) {
       setRepairs(repairData);
-      setDelayLogs(delays);
-      setDqViolations(runDataQualityChecks(repairData, delays));
+      setDelayLogs(delays || []);
+      setDqViolations(runDataQualityChecks(repairData, delays || []));
     }
   }
 
