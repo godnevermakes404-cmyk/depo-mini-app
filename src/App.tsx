@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import { 
-  ALL_STATUSES, STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
-  runDataQualityChecks, calculateLostWagonDays, calculatePercentiles, DQViolation 
+  STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
+  runDataQualityChecks, calculateLostWagonDays, DQViolation 
 } from './depoEngine';
 import './App.css';
 
@@ -25,7 +25,6 @@ export default function App() {
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Форма задержки с Next Action
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayType, setDelayType] = useState<'PRIMARY' | 'SECONDARY'>('PRIMARY');
@@ -34,7 +33,6 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // Форма регистрации вагона
   const [wagonNumber, setWagonNumber] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
@@ -94,7 +92,6 @@ export default function App() {
     if (events) setStatusHistory(events);
   }
 
-  // Смена статуса через безопасную функцию в Supabase
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
     if (newStatus === '08 REPAIR_PAUSED') {
@@ -120,7 +117,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Добавление задержки с обязательным Next Action
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) {
       alert('Заполните причину, ответственного и следующее действие (Next Action)!');
@@ -130,7 +126,6 @@ export default function App() {
     setLoading(true);
     vibrate('heavy');
 
-    // 1. Создание задержки
     await supabase.from('delay_log').insert([{
       repair_id: selectedCase.repair_id,
       category: delayCategory,
@@ -142,7 +137,6 @@ export default function App() {
       start_datetime: new Date().toISOString()
     }]);
 
-    // 2. Перевод в REPAIR_PAUSED
     await supabase.rpc('change_repair_status', {
       p_repair_id: selectedCase.repair_id,
       p_new_status: '08 REPAIR_PAUSED',
@@ -157,7 +151,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Регистрация вагона
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите корректный 8-значный номер вагона!');
@@ -193,13 +186,12 @@ export default function App() {
 
       setWagonNumber(''); setShowAddModal(false); loadData();
     } catch (err: any) {
-      alert('Ошибка создания (возможно, у вагона уже есть активный ремонт): ' + err.message);
+      alert('Ошибка создания: ' + err.message);
     } finally {
       setLoading(false);
     }
   }
 
-  // Экспорт реестра в CSV (Excel)
   function exportToCSV() {
     const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'Owner Type', 'SLA Deadline'];
     const rows = filteredRepairs.map(r => [
@@ -221,12 +213,9 @@ export default function App() {
     document.body.removeChild(link);
   }
 
-  // Фильтрация
   const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
   const filteredRepairs = statusFilter ? repairs.filter(r => r.current_status === statusFilter) : repairs;
   const lostWagonDays = calculateLostWagonDays(delayLogs);
-
-  // Доступные переходы для текущей карточки
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
 
   return (
@@ -239,7 +228,6 @@ export default function App() {
       <div className="content-area">
         {currentTab === 'home' && (
           <>
-            {/* Блок Management by Exception */}
             {dqViolations.length > 0 && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания ({dqViolations.length})</h4>
@@ -253,7 +241,6 @@ export default function App() {
               </div>
             )}
 
-            {/* Сводка с кликабельным Drill-down */}
             <h3 style={{ margin: '12px 0', fontSize: '16px' }}>На территории: {onSiteRepairs.length}</h3>
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter('04 QUEUE'); setCurrentTab('wagons'); }}>
@@ -274,7 +261,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Метрика Lost Wagon-Days */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 4px 0', fontSize: '13px' }}>Потери: <b>{lostWagonDays.totalDays} wagon-days</b></h4>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Рассчитано только по PRIMARY задержкам</span>
@@ -314,7 +300,7 @@ export default function App() {
         {currentTab === 'analytics' && (
           <div className="premium-card">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
-            {Object.entries(lostWagonDays.byCategory).map(([cat, days]) => (
+            {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
               <div key={cat} style={{ marginBottom: '8px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
                   <span><b>{cat}</b></span>
@@ -336,7 +322,6 @@ export default function App() {
         )}
       </div>
 
-      {/* Нижнее меню */}
       <nav className="bottom-nav">
         <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
           <div className="nav-icon">🏠</div><span>Главная</span>
@@ -352,7 +337,6 @@ export default function App() {
         </button>
       </nav>
 
-      {/* Модалка: Регистрация вагона */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -370,7 +354,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка: Карточка вагона и Государственный автомат (State Machine) */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
@@ -385,14 +368,13 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* Разрешенные переходы по State Machine */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
               {availableTransitions.length === 0 ? (
                 <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Цепочка завершена</p>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  {availableTransitions.map(st => (
+                  {availableTransitions.map((st: string) => (
                     <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto' }}>
                       → {STATUS_RU[st] || st}
                     </button>
@@ -401,7 +383,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Журнал событий */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -417,14 +398,13 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка: Блокировка с Next Action */}
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки (Blocker)</h3>
             <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
-              <option value="PRIMARY">PRIMARY (Первичная - считается в Lost Days)</option>
-              <option value="SECONDARY">SECONDARY (Вторичная - накладывается)</option>
+              <option value="PRIMARY">PRIMARY (Первичная)</option>
+              <option value="SECONDARY">SECONDARY (Вторичная)</option>
             </select>
             <select className="select-field" value={delayCategory} onChange={e => setDelayCategory(e.target.value)}>
               <option value="Materials">Материалы / Запчасти</option>
