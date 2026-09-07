@@ -32,6 +32,11 @@ const DEFAULT_SHOPS = [
   { key: 'body', label: 'Кузовной / Сварочный' }
 ];
 
+const TRACKS_CONFIG = [
+  { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
+  { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
+];
+
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо / Диспетчер (Полный доступ)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
@@ -53,7 +58,6 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // Управление цехами: ответственные, Telegram, роли и нормы времени (в часах)
   const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string; role: string; targetHours: number }>>({
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
@@ -380,7 +384,6 @@ export default function App() {
   const isInitialPhase = selectedCase && ['01 PLANNED', '04 QUEUE'].includes(selectedCase.current_status);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
 
-  // Расчет времени цеха с учетом норматива
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
     const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
@@ -420,7 +423,8 @@ export default function App() {
               </div>
             )}
 
-            <h3 style={{ margin: '12px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length}</h3>
+            <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length}</h3>
+            
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter('04 QUEUE'); setCurrentTab('wagons'); }}>
                 <span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span>
@@ -437,6 +441,47 @@ export default function App() {
               <div className="stat-box" onClick={() => { setStatusFilter('11 READY_TO_DISPATCH'); setCurrentTab('wagons'); }}>
                 <span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span>
                 <span className="stat-value">{readyNotDispatched.length}</span>
+              </div>
+            </div>
+
+            {/* ВИЗУАЛЬНАЯ СХЕМА ПУТЕЙ ДЕПО */}
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
+                🗺️ Схема ремонтных путей депо
+              </h4>
+              
+              <div className="tracks-grid">
+                {TRACKS_CONFIG.map(tr => (
+                  <div key={tr.track} className="track-row">
+                    <div className="track-title">
+                      <span>{tr.track}</span>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>3 позиции</span>
+                    </div>
+                    <div className="positions-container">
+                      {tr.positions.map(pos => {
+                        const wagonOnPos = repairs.find(r => r.track_number === tr.track && r.position_number === pos);
+                        const isPaused = wagonOnPos?.current_status === '08 REPAIR_PAUSED';
+
+                        return (
+                          <div 
+                            key={pos} 
+                            className={`position-slot ${wagonOnPos ? 'occupied' : ''} ${isPaused ? 'overdue' : ''}`}
+                            onClick={() => wagonOnPos && openCaseDetails(wagonOnPos)}
+                          >
+                            <span className="slot-label">{pos}</span>
+                            {wagonOnPos ? (
+                              <span className="slot-wagon" style={{ color: isPaused ? 'var(--danger)' : 'var(--brand-color)' }}>
+                                №{wagonOnPos.wagons?.wagon_number}
+                              </span>
+                            ) : (
+                              <span className="slot-empty">Свободно</span>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -514,7 +559,7 @@ export default function App() {
           </>
         )}
 
-        {/* ПРОФИЛЬ: ВЫБОР РОЛИ И НАСТРОЙКИ НОРМАТИВОВ */}
+        {/* ПРОФИЛЬ */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
@@ -529,7 +574,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* ВЫБОР АКТИВНОЙ РОЛИ */}
             <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
               <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
                 🔑 Переключение рабочей роли
@@ -549,7 +593,6 @@ export default function App() {
               </select>
             </div>
 
-            {/* НАЗНАЧЕНИЕ СОТРУДНИКОВ, ИХ РОЛЕЙ И НОРМАТИВОВ ЧАСОВ */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
                 ⚙️ Персонал и Нормативы ремонта цехов
@@ -683,7 +726,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ С ОТОБРАЖЕНИЕМ НОРМАТИВА И ФАКТА ВРЕМЕНИ */}
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
@@ -810,7 +853,7 @@ export default function App() {
                   {!allSigned && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px' }}>⚠️ Завоз доступен после подписи акта всеми мастерами.</div>}
                   <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
                     <select className="select-field" style={{ margin: 0 }} value={track} onChange={e => setTrack(e.target.value)}><option value="Путь 1">Путь №1</option><option value="Путь 2">Путь №2</option></select>
-                    <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option></select>
+                    <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || activeRole !== 'ADMIN'}>⏳ В очередь</button>

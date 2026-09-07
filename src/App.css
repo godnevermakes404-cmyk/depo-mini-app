@@ -200,3 +200,73 @@ body {
   margin-bottom: 6px; 
 }
 .list-btn.done { background: rgba(52, 199, 89, 0.1); border-color: rgba(52, 199, 89, 0.3); color: var(--success); }
+/* Сетка путей депо */
+.tracks-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.track-row {
+  background: var(--card-bg, #ffffff);
+  border: 1px solid var(--border-light, #e5e5ea);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.track-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-color, #007aff);
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.positions-container {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.position-slot {
+  background: var(--bg-color, #f2f2f7);
+  border: 1px dashed #c7c7cc;
+  border-radius: 8px;
+  padding: 8px 6px;
+  text-align: center;
+  min-height: 52px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.position-slot.occupied {
+  border: 1px solid var(--brand-color, #007aff);
+  background: rgba(0, 122, 255, 0.05);
+  cursor: pointer;
+}
+
+.position-slot.overdue {
+  border: 1px solid var(--danger, #ff3b30);
+  background: rgba(255, 59, 48, 0.05);
+}
+
+.slot-label {
+  font-size: 9px;
+  color: var(--text-muted, #8e8e93);
+  margin-bottom: 2px;
+}
+
+.slot-wagon {
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.slot-empty {
+  font-size: 10px;
+  color: var(--text-muted, #8e8e93);
+  font-style: italic;
+}
