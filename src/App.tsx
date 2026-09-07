@@ -333,7 +333,7 @@ export default function App() {
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                  {forecastBreaches.length > 0 && <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг.</div>}
+                  {forecastBreaches.length > 0 && <div><b>⚠️ Риск срыва нормативного срока:</b> {forecastBreaches.length} ваг.</div>}
                   {readyNotDispatched.length > 0 && <div><b>🚂 Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
                   {dqViolations.map((v, i) => <div key={i}><b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
                 </div>
@@ -383,7 +383,7 @@ export default function App() {
               return (
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск SLA' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
                   {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {activeDelay.category}:</b> {activeDelay.cause}</div></div>}
                 </div>
               );
@@ -395,14 +395,16 @@ export default function App() {
         {currentTab === 'analytics' && (
           <>
             <div className="premium-card">
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта (Dwell Time)</h3>
+              {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта</h3>
               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | P90: <b>{drCycle.p90} дн</b></span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Капитальный ремонт (КР):</b></span><span>Медиана: <b>{krCycle.median} дн</b> | P90: <b>{krCycle.p90} дн</b></span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | 90% вагонов: <b>{drCycle.p90} дн</b></span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Капитальный ремонт (КР):</b></span><span>Медиана: <b>{krCycle.median} дн</b> | 90% вагонов: <b>{krCycle.p90} дн</b></span></div>
               </div>
             </div>
             <div className="premium-card">
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
+              {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Парето)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
                 <div key={cat} style={{ marginBottom: '8px' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div><div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div></div>
               ))}
@@ -458,7 +460,7 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (УПРОЩЕННАЯ) */}
+      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -466,7 +468,6 @@ export default function App() {
             <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)" rows={3} />
             <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
             
-            {/* ТОЛЬКО ВЫБОР СОБСТВЕННЫЙ / ЧУЖОЙ */}
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
               <option value="Own">Собственный</option>
               <option value="Third-party">Чужой</option>
@@ -591,12 +592,13 @@ export default function App() {
               <>
                 {selectedMetrics && (
                   <div className="premium-card">
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Модель времени (Time Model)</h4>
+                    {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Анализ времени простоя</h4>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
                       <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
-                      <div>Грязный ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
+                      <div>Общий ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
                     </div>
-                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт (Net):</span><b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт:</span><b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
                   </div>
                 )}
                 
@@ -648,7 +650,13 @@ export default function App() {
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
-            <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}><option value="PRIMARY">PRIMARY</option><option value="SECONDARY">SECONDARY</option></select>
+            
+            {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
+            <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
+              <option value="PRIMARY">Основная задержка</option>
+              <option value="SECONDARY">Сопутствующая задержка</option>
+            </select>
+            
             <select className="select-field" value={delayCategory} onChange={e => {
                 const cat = e.target.value; setDelayCategory(cat);
                 if (cat === 'Materials') { const info = shopMasters.procurement; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки'); } 
@@ -659,7 +667,8 @@ export default function App() {
             </select>
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
-            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
+            {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
+            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Следующее действие" />
             <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
