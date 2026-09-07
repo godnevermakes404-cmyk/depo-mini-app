@@ -56,10 +56,13 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // Формы регистрации вагона
+  // Формы регистрации вагона (ВОССТАНОВЛЕНО ПОЛНОСТЬЮ)
   const [wagonNumber, setWagonNumber] = useState('');
+  const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
   const [owner, setOwner] = useState('ПРОМТРАНС');
+  const [ownerType, setOwnerType] = useState('Own');
+  
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
 
@@ -138,19 +141,30 @@ export default function App() {
     setDocuments(docs || []);
   }
 
-  // --- НОВЫЕ ФУНКЦИИ ИЗ ЦЕХОВОГО ПРОЦЕССА ---
-
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите 8-значный номер вагона');
       return;
     }
     setLoading(true); vibrate('medium');
+    
+    // Передаем все параметры
     const { error } = await supabase.rpc('create_repair_case', {
-      p_wagon_number: wagonNumber, p_repair_type: repairType, p_user_id: user?.id
+      p_wagon_number: wagonNumber, 
+      p_repair_type: repairType, 
+      p_user_id: user?.id,
+      p_wagon_type: wagonType,
+      p_owner: owner,
+      p_owner_type: ownerType
     });
-    if (!error) { setWagonNumber(''); setShowAddModal(false); loadData(); } 
-    else { alert('Ошибка: ' + error.message); }
+    
+    if (!error) { 
+      setWagonNumber(''); 
+      setShowAddModal(false); 
+      loadData(); 
+    } else { 
+      alert('Ошибка: ' + error.message); 
+    }
     setLoading(false);
   }
 
@@ -180,8 +194,6 @@ export default function App() {
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
   }
-
-  // --- СТАНДАРТНЫЕ ФУНКЦИИ ---
 
   async function handleAddDocument() {
     if (!docNumber.trim() || !selectedCase) { alert('Введите номер документа!'); return; }
@@ -382,21 +394,25 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: Регистрация прибытия */}
+      {/* Модалка: Регистрация вагона (ВОССТАНОВЛЕННАЯ) */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Прибытие вагона на депо</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Регистрация вагона</h3>
             <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="Номер вагона (8 цифр)" />
+            <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}>
+              <option>Полувагон</option><option>Цистерна</option><option>Платформа</option>
+            </select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}>
-              <option value="ДР">Деповской ремонт (ДР)</option>
-              <option value="КР">Капитальный ремонт (КР)</option>
-              <option value="ТОР">Текущий отцепочный (ТОР)</option>
+              <option>ТОР</option><option>ДР</option><option>КР</option><option>КРП</option>
             </select>
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
-            <div style={{ display: 'flex', gap: '8px', marginTop: '14px' }}>
+            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
+              <option value="Own">Собственный</option><option value="Third-party">Сторонний</option>
+            </select>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Принять на депо</button>
+              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Создать</button>
             </div>
           </div>
         </div>
