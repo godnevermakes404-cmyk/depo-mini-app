@@ -6,6 +6,10 @@ import {
   runDataQualityChecks, calculateLostWagonDays, calculateCyclePercentiles,
   type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
+import { 
+  notifyWagonArrived, notifyActSigned, notifyPositionAssigned, 
+  notifyShopStageUpdated, notifyDelayRegistered, notifyStatusChanged 
+} from './telegramNotifier';
 import './App.css';
 
 declare global { interface Window { Telegram: any; } }
@@ -49,7 +53,6 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // Управление ответственными, Telegram аккаунтами и ролями
   const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string; role: string }>>({
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER' },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER' },
@@ -195,6 +198,7 @@ export default function App() {
     setDocuments(docs || []);
   }
 
+  // 1. Создание вагона (Прибыл)
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите 8-значный номер вагона');
@@ -212,6 +216,7 @@ export default function App() {
     });
     
     if (!error) { 
+      notifyWagonArrived(wagonNumber, repairType, owner, wagonType); // 🔔 Телеграм алерт
       setWagonNumber(''); 
       setShowAddModal(false); 
       loadData(); 
@@ -221,6 +226,7 @@ export default function App() {
     setLoading(false);
   }
 
+  // 2. Подпись Акта мастером
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey)) {
       alert(`⛔ Ошибка доступа: Подписать акт может только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
@@ -236,12 +242,14 @@ export default function App() {
       p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel
     });
     if (!error) {
+      notifyActSigned(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', signLabel); // 🔔 Телеграм алерт
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
       loadData();
     }
     setLoading(false);
   }
 
+  // 3. Обновление этапа цеха
   async function handleUpdateShopStage(shopKey: string, status: string) {
     if (!canPerformAction(shopKey)) {
       alert(`⛔ Ошибка доступа: Работы в цехе может отмечать только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
@@ -261,12 +269,14 @@ export default function App() {
     });
 
     if (!error) {
+      notifyShopStageUpdated(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', status, masterLabel); // 🔔 Телеграм алерт
       setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
       loadData();
     }
     setLoading(false);
   }
 
+  // 4. Завоз на путь или в очередь
   async function handleAssignPosition(toRepair: boolean) {
     if (activeRole !== 'ADMIN') {
       alert('⛔ Завезти вагон на путь или отправить в очередь может только Диспетчер / Админ.');
@@ -281,8 +291,13 @@ export default function App() {
       p_position: toRepair ? position : null,
       p_user_id: user?.id
     });
-    if (!error) { setSelectedCase(null); loadData(); } 
-    else { alert('Ошибка: ' + error.message); }
+    if (!error) { 
+      notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); // 🔔 Телеграм алерт
+      setSelectedCase(null); 
+      loadData(); 
+    } else { 
+      alert('Ошибка: ' + error.message); 
+    }
     setLoading(false);
   }
 
@@ -312,11 +327,17 @@ export default function App() {
     const { error } = await supabase.rpc('change_repair_status', {
       p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}`
     });
-    if (!error) { setSelectedCase(null); loadData(); } 
-    else { alert('Ошибка: ' + error.message); }
+    if (!error) { 
+      notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); // 🔔 Телеграм алерт
+      setSelectedCase(null); 
+      loadData(); 
+    } else { 
+      alert('Ошибка: ' + error.message); 
+    }
     setLoading(false);
   }
 
+  // 5. Задержка
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните причину, ответственного и следующее действие!'); return; }
     setLoading(true); vibrate('heavy');
@@ -326,6 +347,7 @@ export default function App() {
       p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id
     });
     if (!error) {
+      notifyDelayRegistered(selectedCase.wagons?.wagon_number, delayCategory, delayCause, responsibleParty, nextAction); // 🔔 Телеграм алерт
       setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); setActionDeadline(''); loadData();
     } else {
       alert('Ошибка добавления задержки: ' + error.message);
@@ -504,7 +526,7 @@ export default function App() {
                 🔑 Переключение рабочей роли
               </h4>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 10px 0' }}>
-                Выберите от чьего имени вы сейчас работаете в системе. Права подписи будут ограничены выбранной ролью:
+                Выберите от чьего имени вы сейчас работаете в системе:
               </p>
               <select 
                 className="select-field" 
@@ -654,7 +676,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ */}
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ TELEGRAM-ЮЗЕРОВ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
