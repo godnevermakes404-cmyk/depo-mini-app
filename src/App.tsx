@@ -39,12 +39,13 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // Управление ответственными за цеха
-  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string }>>({
-    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.' },
-    wheels: { label: 'Колёсный цех', master: 'Петров П.П.' },
-    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.' },
-    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.' }
+  // Управление ответственными и Telegram юзерами
+  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string }>>({
+    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie' },
+    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels' },
+    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes' },
+    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body' },
+    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk' }
   });
 
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -115,12 +116,16 @@ export default function App() {
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
 
-    // Загрузка динамических мастеров цехов
+    // Загрузка динамических мастеров цехов и оформителя актов
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
     if (mastersData && mastersData.length > 0) {
       const mapped: any = {};
       mastersData.forEach((m: any) => {
-        mapped[m.shop_key] = { label: m.shop_name, master: m.master_name };
+        mapped[m.shop_key] = { 
+          label: m.shop_name, 
+          master: m.master_name,
+          tg: m.telegram_handle || '@master'
+        };
       });
       setShopMasters(mapped);
     }
@@ -133,7 +138,6 @@ export default function App() {
     }
   }
 
-  // Сохранение настроек мастеров из профиля
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
@@ -141,10 +145,11 @@ export default function App() {
         shop_key: key,
         shop_name: val.label,
         master_name: val.master,
+        telegram_handle: val.tg,
         updated_at: new Date().toISOString()
       });
     }
-    alert('Ответственные за цеха успешно обновлены!');
+    alert('Ответственные и Telegram аккаунты сохранены!');
     setLoading(false);
     loadData();
   }
@@ -204,9 +209,11 @@ export default function App() {
   async function handleSignAct(shopKey: string) {
     if (!selectedCase) return;
     setLoading(true);
-    const masterName = shopMasters[shopKey]?.master || user?.name || 'Мастер цеха';
+    const masterInfo = shopMasters[shopKey];
+    const signLabel = `${masterInfo?.master || 'Мастер'} (${masterInfo?.tg || ''})`.trim();
+    
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', {
-      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: masterName
+      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel
     });
     if (!error) {
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
@@ -218,12 +225,14 @@ export default function App() {
   async function handleUpdateShopStage(shopKey: string, status: string) {
     if (!selectedCase) return;
     setLoading(true);
-    const masterName = shopMasters[shopKey]?.master || 'Мастер цеха';
+    const masterInfo = shopMasters[shopKey];
+    const masterLabel = `${masterInfo?.master || 'Мастер'} (${masterInfo?.tg || ''})`.trim();
+
     const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', {
       p_repair_id: selectedCase.repair_id,
       p_shop_key: shopKey,
       p_status: status,
-      p_master_name: masterName
+      p_master_name: masterLabel
     });
 
     if (!error) {
@@ -321,6 +330,8 @@ export default function App() {
     const hours = Math.max(0, (new Date().getTime() - new Date(startAt).getTime()) / (1000 * 60 * 60));
     return hours < 1 ? `${Math.round(hours * 60)} мин` : `${hours.toFixed(1)} ч`;
   };
+
+  const docsClerk = shopMasters['docs'] || { master: 'Анна Сергеевна', tg: '@depo_docs_clerk' };
 
   return (
     <div>
@@ -437,7 +448,7 @@ export default function App() {
           </>
         )}
 
-        {/* ПРОФИЛЬ: Управление ответственными за цеха */}
+        {/* ПРОФИЛЬ: Управление персоналом и Telegram Аккаунтами */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
@@ -447,34 +458,34 @@ export default function App() {
 
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
-                ⚙️ Назначение ответственных за цеха
+                ⚙️ Ответственные и Telegram Юзеры
               </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {Object.entries(shopMasters).map(([key, val]) => (
-                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 'bold' }}>{val.label}</label>
-                    <input 
-                      className="input-field" 
-                      style={{ margin: 0, padding: '6px 10px', fontSize: '11px' }} 
-                      type="text" 
-                      value={val.master} 
-                      onChange={e => {
-                        setShopMasters({
-                          ...shopMasters,
-                          [key]: { ...val, master: e.target.value }
-                        });
-                      }} 
-                      placeholder="ФИО Ответственного" 
-                    />
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand-color)' }}>{val.label}</span>
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <input 
+                        className="input-field" 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: 1.2 }} 
+                        type="text" 
+                        value={val.master} 
+                        onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} 
+                        placeholder="ФИО сотрудника" 
+                      />
+                      <input 
+                        className="input-field" 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: 0.8 }} 
+                        type="text" 
+                        value={val.tg} 
+                        onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} 
+                        placeholder="@username" 
+                      />
+                    </div>
                   </div>
                 ))}
-                <button 
-                  className="btn-primary" 
-                  style={{ marginTop: '8px' }} 
-                  onClick={handleSaveMasters} 
-                  disabled={loading}
-                >
-                  💾 Сохранить ответственных
+                <button className="btn-primary" style={{ marginTop: '4px' }} onClick={handleSaveMasters} disabled={loading}>
+                  💾 Сохранить персонал депо
                 </button>
               </div>
             </div>
@@ -566,7 +577,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ (Динамические мастера из админки) */}
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ TELEGRAM-ЮЗЕРОВ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
@@ -575,7 +586,7 @@ export default function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {DEFAULT_SHOPS.map(s => {
                     const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
-                    const masterName = shopMasters[s.key]?.master || 'Мастер не назначен';
+                    const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                     const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
 
@@ -591,7 +602,7 @@ export default function App() {
                             {s.label} {isCurrent && <span style={{ color: 'var(--brand-color)', fontSize: '10px' }}>(В работе: {getShopDuration(prog.start_at)})</span>}
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            Ответственный: <b>{masterName}</b>
+                            Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)
                           </div>
                         </div>
 
@@ -623,13 +634,13 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {DEFAULT_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
-                      const assignedMaster = shopMasters[s.key]?.master || 'Мастер';
+                      const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                       return (
                         <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
                             <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                              Ответственный: <b>{sig?.master_name || assignedMaster}</b>
+                              Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg})
                               {sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
                             </div>
                           </div>
@@ -704,9 +715,15 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Документы */}
+                {/* Документы и Ответственный за акты (Оформитель) */}
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4>
+                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                      Оформитель: <b>{docsClerk.master}</b> (<a href={`https://t.me/${docsClerk.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)' }}>{docsClerk.tg}</a>)
+                    </span>
+                  </div>
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
                     {documents.map((d: any) => (
                       <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
