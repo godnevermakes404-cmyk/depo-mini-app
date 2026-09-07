@@ -40,7 +40,7 @@ const ROLES_LIST = [
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
-  const [activeRole, setActiveRole] = useState<string>('ADMIN'); // Переключаемая роль
+  const [activeRole, setActiveRole] = useState<string>('ADMIN');
   const [showAddModal, setShowAddModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -49,12 +49,13 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string }>>({
-    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie' },
-    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels' },
-    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes' },
-    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body' },
-    docs: { label: 'Оформитель актов', master: 'Анна Сергеевна', tg: '@depo_docs_clerk' }
+  // Управление ответственными, Telegram аккаунтами и ролями
+  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string; role: string }>>({
+    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER' },
+    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER' },
+    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER' },
+    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER' },
+    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK' }
   });
 
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -132,7 +133,8 @@ export default function App() {
         mapped[m.shop_key] = { 
           label: m.shop_name, 
           master: m.master_name,
-          tg: m.telegram_handle || '@master'
+          tg: m.telegram_handle || '@master',
+          role: m.role_code || 'MASTER'
         };
       });
       setShopMasters(mapped);
@@ -146,7 +148,6 @@ export default function App() {
     }
   }
 
-  // Проверка прав на выполнение действия в цехе
   const canPerformAction = (targetShopKey: string) => {
     return activeRole === 'ADMIN' || activeRole === targetShopKey;
   };
@@ -159,10 +160,11 @@ export default function App() {
         shop_name: val.label,
         master_name: val.master,
         telegram_handle: val.tg,
+        role_code: val.role,
         updated_at: new Date().toISOString()
       });
     }
-    alert('Ответственные сохранены!');
+    alert('Персонал, Telegram-аккаунты и роли сохранены!');
     setLoading(false);
     loadData();
   }
@@ -496,7 +498,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* ВЫБОР АКТИВНОЙ РОЛИ ДЛЯ ТЕСТИРОВАНИЯ ИЛИ РАБОТЫ */}
+            {/* ВЫБОР АКТИВНОЙ РОЛИ */}
             <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
               <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
                 🔑 Переключение рабочей роли
@@ -519,18 +521,19 @@ export default function App() {
               </select>
             </div>
 
+            {/* НАЗНАЧЕНИЕ СОТРУДНИКОВ, TELEGRAM АККАУНТОВ И ИХ РОЛЕЙ */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
-                ⚙️ Назначение ответственных и Telegram аккаунтов
+                ⚙️ Ответственные, Telegram Аккаунты и Роли
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {Object.entries(shopMasters).map(([key, val]) => (
-                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
                     <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand-color)' }}>{val.label}</span>
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input 
                         className="input-field" 
-                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: 1.2 }} 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 120px' }} 
                         type="text" 
                         value={val.master} 
                         onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} 
@@ -538,17 +541,28 @@ export default function App() {
                       />
                       <input 
                         className="input-field" 
-                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: 0.8 }} 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 100px' }} 
                         type="text" 
                         value={val.tg} 
                         onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} 
                         placeholder="@username" 
                       />
+                      <select 
+                        className="select-field" 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} 
+                        value={val.role || 'MASTER'} 
+                        onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, role: e.target.value } })}
+                      >
+                        <option value="MASTER">Мастер цеха</option>
+                        <option value="DISPATCHER">Диспетчер</option>
+                        <option value="CLERK">Оформитель актов</option>
+                        <option value="ADMIN">Начальник депо</option>
+                      </select>
                     </div>
                   </div>
                 ))}
                 <button className="btn-primary" style={{ marginTop: '4px' }} onClick={handleSaveMasters} disabled={loading}>
-                  💾 Сохранить персонал депо
+                  💾 Сохранить персонал и роли
                 </button>
               </div>
             </div>
@@ -640,7 +654,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ TELEGRAM-ЮЗЕРОВ */}
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
