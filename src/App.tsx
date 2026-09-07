@@ -269,7 +269,7 @@ export default function App() {
     setLoading(true); vibrate('medium');
     let successCount = 0;
     const addedWagons: string[] = [];
-    let lastDbError = ''; // Сохраняем реальную ошибку
+    let lastDbError = '';
 
     for (const num of numbers) {
       const { error } = await supabase.rpc('create_repair_case', {
@@ -282,7 +282,7 @@ export default function App() {
         addedWagons.push(num); 
       } else {
         console.error("RPC Error:", error);
-        lastDbError = error.message; // Запоминаем причину сбоя
+        lastDbError = error.message;
       }
     }
     
@@ -293,8 +293,7 @@ export default function App() {
       alert(`Успешно принято вагонов на территорию: ${successCount} шт.`);
       setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
     } else { 
-      // 🚨 ВЫВОДИМ РЕАЛЬНУЮ ОШИБКУ ОТ POSTGRES
-      alert(`Ошибка БД:\n${lastDbError}\n\nСкиньте скриншот этого сообщения.`); 
+      alert(`Ошибка БД:\n${lastDbError}`); 
     }
     setLoading(false);
   }
@@ -430,6 +429,9 @@ export default function App() {
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+
+  // Расчет количества корректных 8-значных вагонов
+  const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
@@ -645,6 +647,11 @@ export default function App() {
               placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)"
               rows={3}
             />
+            {/* 🎯 СЧЕТЧИК РАСПОЗНАННЫХ ВАГОНОВ */}
+            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>
+              Распознано вагонов: {parsedWagonsCount} шт.
+            </div>
+
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option><option>Крытый</option><option>Переоборудованный</option></select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>КР</option><option>ДР</option><option>ТР</option><option>КРП</option><option>ДРП</option></select>
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
@@ -652,7 +659,9 @@ export default function App() {
             
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Зарегистрировать</button>
+              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>
+                Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}
+              </button>
             </div>
           </div>
         </div>
