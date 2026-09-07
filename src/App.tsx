@@ -53,12 +53,13 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string; role: string }>>({
-    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER' },
-    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER' },
-    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER' },
-    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER' },
-    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK' }
+  // Управление цехами: ответственные, Telegram, роли и нормы времени (в часах)
+  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string; role: string; targetHours: number }>>({
+    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
+    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
+    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
+    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
+    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
   });
 
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -137,7 +138,8 @@ export default function App() {
           label: m.shop_name, 
           master: m.master_name,
           tg: m.telegram_handle || '@master',
-          role: m.role_code || 'MASTER'
+          role: m.role_code || 'MASTER',
+          targetHours: Number(m.target_hours || 4)
         };
       });
       setShopMasters(mapped);
@@ -164,10 +166,11 @@ export default function App() {
         master_name: val.master,
         telegram_handle: val.tg,
         role_code: val.role,
+        target_hours: val.targetHours,
         updated_at: new Date().toISOString()
       });
     }
-    alert('Персонал, Telegram-аккаунты и роли сохранены!');
+    alert('Персонал, нормативы и Telegram-аккаунты сохранены!');
     setLoading(false);
     loadData();
   }
@@ -198,7 +201,6 @@ export default function App() {
     setDocuments(docs || []);
   }
 
-  // 1. Создание вагона (Прибыл)
   async function handleCreateRepair() {
     if (!wagonNumber.trim() || wagonNumber.length !== 8) {
       alert('Введите 8-значный номер вагона');
@@ -216,7 +218,7 @@ export default function App() {
     });
     
     if (!error) { 
-      notifyWagonArrived(wagonNumber, repairType, owner, wagonType); // 🔔 Телеграм алерт
+      notifyWagonArrived(wagonNumber, repairType, owner, wagonType);
       setWagonNumber(''); 
       setShowAddModal(false); 
       loadData(); 
@@ -226,7 +228,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 2. Подпись Акта мастером
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey)) {
       alert(`⛔ Ошибка доступа: Подписать акт может только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
@@ -242,14 +243,13 @@ export default function App() {
       p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel
     });
     if (!error) {
-      notifyActSigned(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', signLabel); // 🔔 Телеграм алерт
+      notifyActSigned(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', signLabel);
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
       loadData();
     }
     setLoading(false);
   }
 
-  // 3. Обновление этапа цеха
   async function handleUpdateShopStage(shopKey: string, status: string) {
     if (!canPerformAction(shopKey)) {
       alert(`⛔ Ошибка доступа: Работы в цехе может отмечать только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
@@ -269,14 +269,13 @@ export default function App() {
     });
 
     if (!error) {
-      notifyShopStageUpdated(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', status, masterLabel); // 🔔 Телеграм алерт
+      notifyShopStageUpdated(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', status, masterLabel);
       setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
       loadData();
     }
     setLoading(false);
   }
 
-  // 4. Завоз на путь или в очередь
   async function handleAssignPosition(toRepair: boolean) {
     if (activeRole !== 'ADMIN') {
       alert('⛔ Завезти вагон на путь или отправить в очередь может только Диспетчер / Админ.');
@@ -292,7 +291,7 @@ export default function App() {
       p_user_id: user?.id
     });
     if (!error) { 
-      notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); // 🔔 Телеграм алерт
+      notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position);
       setSelectedCase(null); 
       loadData(); 
     } else { 
@@ -328,7 +327,7 @@ export default function App() {
       p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}`
     });
     if (!error) { 
-      notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); // 🔔 Телеграм алерт
+      notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus);
       setSelectedCase(null); 
       loadData(); 
     } else { 
@@ -337,7 +336,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 5. Задержка
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните причину, ответственного и следующее действие!'); return; }
     setLoading(true); vibrate('heavy');
@@ -347,7 +345,7 @@ export default function App() {
       p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id
     });
     if (!error) {
-      notifyDelayRegistered(selectedCase.wagons?.wagon_number, delayCategory, delayCause, responsibleParty, nextAction); // 🔔 Телеграм алерт
+      notifyDelayRegistered(selectedCase.wagons?.wagon_number, delayCategory, delayCause, responsibleParty, nextAction);
       setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); setActionDeadline(''); loadData();
     } else {
       alert('Ошибка добавления задержки: ' + error.message);
@@ -382,10 +380,21 @@ export default function App() {
   const isInitialPhase = selectedCase && ['01 PLANNED', '04 QUEUE'].includes(selectedCase.current_status);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
 
-  const getShopDuration = (startAt: string | null) => {
-    if (!startAt) return '0 ч';
-    const hours = Math.max(0, (new Date().getTime() - new Date(startAt).getTime()) / (1000 * 60 * 60));
-    return hours < 1 ? `${Math.round(hours * 60)} мин` : `${hours.toFixed(1)} ч`;
+  // Расчет времени цеха с учетом норматива
+  const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
+    const startTime = startAt ? new Date(startAt).getTime() : null;
+    const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
+    
+    if (!startTime) return { text: `Норма: ${targetHours} ч`, isOverdue: false };
+
+    const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+    const isOverdue = hoursSpent > targetHours;
+    const timeFormatted = hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`;
+
+    return {
+      text: `${timeFormatted} / Норма: ${targetHours} ч`,
+      isOverdue
+    };
   };
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
@@ -505,7 +514,7 @@ export default function App() {
           </>
         )}
 
-        {/* ПРОФИЛЬ: ВЫБОР РОЛИ И НАСТРОЙКИ */}
+        {/* ПРОФИЛЬ: ВЫБОР РОЛИ И НАСТРОЙКИ НОРМАТИВОВ */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
@@ -525,9 +534,6 @@ export default function App() {
               <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
                 🔑 Переключение рабочей роли
               </h4>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 10px 0' }}>
-                Выберите от чьего имени вы сейчас работаете в системе:
-              </p>
               <select 
                 className="select-field" 
                 style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
@@ -543,10 +549,10 @@ export default function App() {
               </select>
             </div>
 
-            {/* НАЗНАЧЕНИЕ СОТРУДНИКОВ, TELEGRAM АККАУНТОВ И ИХ РОЛЕЙ */}
+            {/* НАЗНАЧЕНИЕ СОТРУДНИКОВ, ИХ РОЛЕЙ И НОРМАТИВОВ ЧАСОВ */}
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
-                ⚙️ Ответственные, Telegram Аккаунты и Роли
+                ⚙️ Персонал и Нормативы ремонта цехов
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {Object.entries(shopMasters).map(([key, val]) => (
@@ -555,7 +561,7 @@ export default function App() {
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       <input 
                         className="input-field" 
-                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 120px' }} 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} 
                         type="text" 
                         value={val.master} 
                         onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} 
@@ -563,28 +569,29 @@ export default function App() {
                       />
                       <input 
                         className="input-field" 
-                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 100px' }} 
+                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} 
                         type="text" 
                         value={val.tg} 
                         onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} 
                         placeholder="@username" 
                       />
-                      <select 
-                        className="select-field" 
-                        style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} 
-                        value={val.role || 'MASTER'} 
-                        onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, role: e.target.value } })}
-                      >
-                        <option value="MASTER">Мастер цеха</option>
-                        <option value="DISPATCHER">Диспетчер</option>
-                        <option value="CLERK">Оформитель актов</option>
-                        <option value="ADMIN">Начальник депо</option>
-                      </select>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
+                        <input 
+                          className="input-field" 
+                          style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} 
+                          type="number" 
+                          step="0.5"
+                          value={val.targetHours} 
+                          onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} 
+                          placeholder="Норма" 
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч. норма</span>
+                      </div>
                     </div>
                   </div>
                 ))}
                 <button className="btn-primary" style={{ marginTop: '4px' }} onClick={handleSaveMasters} disabled={loading}>
-                  💾 Сохранить персонал и роли
+                  💾 Сохранить нормативы и персонал
                 </button>
               </div>
             </div>
@@ -676,7 +683,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ TELEGRAM-ЮЗЕРОВ */}
+            {/* БЛОК ЦЕХОВ С ОТОБРАЖЕНИЕМ НОРМАТИВА И ФАКТА ВРЕМЕНИ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
@@ -685,10 +692,12 @@ export default function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {DEFAULT_SHOPS.map(s => {
                     const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
-                    const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
+                    const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master', targetHours: 4 };
                     const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
                     const canEdit = canPerformAction(s.key);
+
+                    const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
 
                     return (
                       <div key={s.key} style={{ 
@@ -700,7 +709,16 @@ export default function App() {
                       }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>
-                            {s.label} {isCurrent && <span style={{ color: 'var(--brand-color)', fontSize: '10px' }}>(В работе: {getShopDuration(prog.start_at)})</span>}
+                            {s.label}
+                            <span style={{ 
+                              color: timeInfo.isOverdue ? 'var(--danger)' : isCurrent ? 'var(--brand-color)' : 'var(--text-muted)', 
+                              fontSize: '10px', 
+                              marginLeft: '4px',
+                              fontWeight: timeInfo.isOverdue ? 'bold' : 'normal'
+                            }}>
+                              ({isCurrent ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text})
+                              {timeInfo.isOverdue && ' ⚠️ Превышение!'}
+                            </span>
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
                             Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)
