@@ -106,7 +106,7 @@ const ROLES_LIST = [
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
-  const [activeRole, setActiveRole] = useState<string>('ADMIN');
+  const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -130,6 +130,7 @@ export default function App() {
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
   const [docNumber, setDocNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
 
   // Формы задержек
   const [showDelayModal, setShowDelayModal] = useState(false);
@@ -161,25 +162,32 @@ export default function App() {
     try {
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
-        tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color');
+        tg.ready(); 
+        tg.expand(); 
+        tg.setHeaderColor?.('bg_color');
         tgUser = tg.initDataUnsafe?.user;
       }
     } catch (e) {}
 
-    if (tgUser?.id) {
-      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
-      if (dbUser) {
-        setUser(dbUser);
-        setActiveRole(dbUser.role || 'GUEST');
-      } else {
-        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }]).select().single();
-        setUser(newUser);
-        setActiveRole('GUEST');
-      }
-    } else {
-      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир', role: 'ADMIN' });
-      setActiveRole('ADMIN');
+    // 🔒 ИСПРАВЛЕНО: Никаких админов по умолчанию! Нет Telegram = нет входа.
+    if (!tgUser?.id) {
+      setIsOutsideTelegram(true);
+      return; // Останавливаем выполнение
     }
+
+    const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
+    
+    if (dbUser) {
+      setUser(dbUser);
+      setActiveRole(dbUser.role || 'GUEST');
+    } else {
+      const { data: newUser } = await supabase.from('users')
+        .insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }])
+        .select().single();
+      setUser(newUser);
+      setActiveRole('GUEST');
+    }
+    
     loadData();
   }
 
@@ -218,6 +226,8 @@ export default function App() {
   }
 
   async function handleRoleChange(newRole: string) {
+    // 🔒 ИСПРАВЛЕНО: Смена роли теперь исключительно локальная (Impersonation).
+    // Позволяет админу видеть интерфейс глазами разных мастеров, но не меняет реальную роль в БД.
     setActiveRole(newRole);
     vibrate('medium');
   }
@@ -433,6 +443,18 @@ export default function App() {
   };
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
+
+  // 🔒 БЛОКИРОВКА ЭКРАНА ЕСЛИ ВХОД НЕ ЧЕРЕЗ TELEGRAM
+  if (isOutsideTelegram) {
+    return (
+      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', textAlign: 'center', padding: '20px' }}>
+        <div>
+          <h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2>
+          <p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
