@@ -218,7 +218,9 @@ export default function App() {
       p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id
     });
     if (!error) {
-      setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); loadData();
+      setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); setActionDeadline(''); loadData();
+    } else {
+      alert('Ошибка добавления задержки: ' + error.message);
     }
     setLoading(false);
   }
@@ -543,6 +545,8 @@ export default function App() {
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action (Следующее действие)" />
+            <input className="input-field" type="datetime-local" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} />
+            
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
               <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button>
