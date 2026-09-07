@@ -98,6 +98,7 @@ const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
+  { key: 'procurement', label: '📦 Отдел снабжения / Закупки (Материалы)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
@@ -118,6 +119,7 @@ export default function App() {
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В. (Закупки)', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
@@ -204,7 +206,7 @@ export default function App() {
           role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4)
         };
       });
-      setShopMasters(mapped);
+      setShopMasters(prev => ({ ...prev, ...mapped }));
     }
 
     if (metrics) setTimeMetricsList(metrics);
@@ -370,7 +372,14 @@ export default function App() {
 
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
-    if (newStatus === CASE_STATUS.PAUSED) { setShowDelayModal(true); return; }
+    if (newStatus === CASE_STATUS.PAUSED) { 
+      // 🎯 Автоподстановка закупщика при открытии задержки по материалам
+      setDelayCategory('Materials');
+      const supplyInfo = shopMasters.procurement;
+      setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения / Закупки');
+      setShowDelayModal(true); 
+      return; 
+    }
     setLoading(true); vibrate('medium');
     
     const { error } = await supabase.rpc('change_repair_status', {
@@ -430,7 +439,6 @@ export default function App() {
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
 
-  // Расчет количества корректных 8-значных вагонов
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
@@ -555,7 +563,6 @@ export default function App() {
               );
             })}
             
-            {/* Кнопка регистрации доступна ТОЛЬКО Охране и Админу */}
             {(activeRole === 'ADMIN' || activeRole === 'security') && (
               <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
             )}
@@ -608,10 +615,12 @@ export default function App() {
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} type="text" value={val.master} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} placeholder="ФИО" />
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} type="text" value={val.tg} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} placeholder="@username" />
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
-                            <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
-                            <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч.</span>
-                          </div>
+                          {key !== 'procurement' && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
+                              <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч.</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -635,7 +644,7 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (ОХРАНА И АДМИН) */}
+      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -647,7 +656,6 @@ export default function App() {
               placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)"
               rows={3}
             />
-            {/* 🎯 СЧЕТЧИК РАСПОЗНАННЫХ ВАГОНОВ */}
             <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>
               Распознано вагонов: {parsedWagonsCount} шт.
             </div>
@@ -667,7 +675,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Универсальная Модалка Вагона */}
+      {/* Модалка Вагона */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
@@ -831,10 +839,28 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
             <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}><option value="PRIMARY">PRIMARY</option><option value="SECONDARY">SECONDARY</option></select>
-            <select className="select-field" value={delayCategory} onChange={e => setDelayCategory(e.target.value)}><option value="Materials">Материалы / Запчасти</option><option value="Customer">Заказчик</option><option value="Railway">ЖД</option></select>
-            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
+            
+            <select 
+              className="select-field" 
+              value={delayCategory} 
+              onChange={e => {
+                const cat = e.target.value;
+                setDelayCategory(cat);
+                if (cat === 'Materials') {
+                  const supplyInfo = shopMasters.procurement;
+                  setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения / Закупки');
+                }
+              }}
+            >
+              <option value="Materials">Материалы / Запчасти</option>
+              <option value="Customer">Заказчик</option>
+              <option value="Railway">ЖД</option>
+            </select>
+
+            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки (например, нет цельнокатаных колёс)" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
-            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
+            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action (например, заказать со склада)" />
+            
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
               <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button>
