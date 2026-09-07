@@ -166,10 +166,14 @@ export default function App() {
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
+  // 🔒 СОХРАНЕНИЕ ПЕРСОНАЛА ЧЕРЕЗ RPC (Больше никаких прямых UPSERT)
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
-      await supabase.from('shop_masters').upsert({ shop_key: key, shop_name: val.label, master_name: val.master, telegram_handle: val.tg, role_code: val.role, target_hours: val.targetHours, updated_at: new Date().toISOString() });
+      const { error } = await supabase.rpc('update_shop_master', {
+        p_shop_key: key, p_shop_name: val.label, p_master_name: val.master, p_tg: val.tg, p_role_code: val.role, p_target_hours: val.targetHours, p_user_id: user?.id
+      });
+      if (error) { alert(`Ошибка сохранения ${val.label}: ` + error.message); }
     }
     alert('Персонал сохранен!'); setLoading(false); loadData();
   }
@@ -212,8 +216,7 @@ export default function App() {
   }
 
   async function handleSignAct(shopKey: string) {
-    if (!canPerformAction(shopKey)) return;
-    if (!selectedCase) return;
+    if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
     const signLabel = getMasterLabel(shopKey);
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel, p_user_id: user?.id });
@@ -239,26 +242,13 @@ export default function App() {
     setLoading(false);
   }
 
-  // 🔒 ИСПОЛЬЗУЕМ БЕЗОПАСНЫЙ RPC ВМЕСТО ПРЯМОГО INSERT
   async function handleAddDocument() {
     if (activeRole !== 'ADMIN' && activeRole !== 'docs') return;
     if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
-    
-    const { error } = await supabase.rpc('add_document', {
-      p_repair_id: selectedCase.repair_id,
-      p_doc_type: docType,
-      p_doc_number: docNumber,
-      p_user_id: user?.id
-    });
-    
-    if (!error) {
-      setDocNumber('');
-      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
-      setDocuments(docs || []);
-    } else {
-      alert('Ошибка добавления документа: ' + error.message);
-    }
+    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id });
+    if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
+    else { alert('Ошибка: ' + error.message); }
     setLoading(false);
   }
 
@@ -281,10 +271,8 @@ export default function App() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
     setLoading(true); vibrate('heavy');
     const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id });
-    if (!error) { 
-      notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); 
-      setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); 
-    }
+    if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); }
+    else { alert('Ошибка задержки: ' + error.message); }
     setLoading(false);
   }
 
@@ -492,9 +480,20 @@ export default function App() {
             <div className="premium-card">
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Вид ремонта:</span>
-                <select className="select-field" style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} value={selectedCase.repair_type || 'ДР'} onChange={async (e) => {
-                    const newType = e.target.value; setSelectedCase({ ...selectedCase, repair_type: newType });
-                    await supabase.from('repair_cases').update({ repair_type: newType }).eq('repair_id', selectedCase.repair_id); loadData();
+                
+                {/* 🔒 СМЕНА ВИДА РЕМОНТА ЧЕРЕЗ НОВЫЙ RPC */}
+                <select 
+                  className="select-field" 
+                  style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                  value={selectedCase.repair_type || 'ДР'} 
+                  disabled={!isAdminOrOperator || loading}
+                  onChange={async (e) => {
+                    const newType = e.target.value;
+                    setLoading(true);
+                    const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: user?.id });
+                    if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
+                    else { alert('Ошибка смены вида ремонта: ' + error.message); }
+                    setLoading(false);
                   }}>
                   <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
                 </select>
