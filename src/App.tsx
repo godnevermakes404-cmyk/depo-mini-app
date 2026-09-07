@@ -113,12 +113,15 @@ export default function App() {
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
       if (dbUser) {
         setUser(dbUser);
+        setActiveRole(dbUser.role || 'ADMIN');
       } else {
         const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'ADMIN' }]).select().single();
         setUser(newUser);
+        setActiveRole('ADMIN');
       }
     } else {
       setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир', role: 'ADMIN' });
+      setActiveRole('ADMIN');
     }
     loadData();
   }
@@ -154,6 +157,16 @@ export default function App() {
       setRepairs(repairData);
       setDelayLogs(delays || []);
       setDqViolations(runDataQualityChecks(repairData, delays || []));
+    }
+  }
+
+  // Синхронизация роли напрямую с таблицей users
+  async function handleRoleChange(newRole: string) {
+    setActiveRole(newRole);
+    vibrate('medium');
+    if (user?.id) {
+      await supabase.from('users').update({ role: newRole }).eq('id', user.id);
+      setUser((prev: any) => ({ ...prev, role: newRole }));
     }
   }
 
@@ -244,12 +257,17 @@ export default function App() {
     const signLabel = `${masterInfo?.master || 'Мастер'} (${masterInfo?.tg || ''})`.trim();
     
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', {
-      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel
+      p_repair_id: selectedCase.repair_id, 
+      p_shop_key: shopKey, 
+      p_user_name: signLabel,
+      p_user_id: user?.id
     });
     if (!error) {
       notifyActSigned(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', signLabel);
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
       loadData();
+    } else {
+      alert('Ошибка подписи: ' + error.message);
     }
     setLoading(false);
   }
@@ -269,13 +287,16 @@ export default function App() {
       p_repair_id: selectedCase.repair_id,
       p_shop_key: shopKey,
       p_status: status,
-      p_master_name: masterLabel
+      p_master_name: masterLabel,
+      p_user_id: user?.id
     });
 
     if (!error) {
       notifyShopStageUpdated(selectedCase.wagons?.wagon_number, masterInfo?.label || 'Цех', status, masterLabel);
       setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
       loadData();
+    } else {
+      alert('Ошибка обновления этапа: ' + error.message);
     }
     setLoading(false);
   }
@@ -299,7 +320,7 @@ export default function App() {
       setSelectedCase(null); 
       loadData(); 
     } else { 
-      alert('Ошибка: ' + error.message); 
+      alert('Ошибка назначения позиции: ' + error.message); 
     }
     setLoading(false);
   }
@@ -335,7 +356,7 @@ export default function App() {
       setSelectedCase(null); 
       loadData(); 
     } else { 
-      alert('Ошибка: ' + error.message); 
+      alert('Ошибка смены статуса: ' + error.message); 
     }
     setLoading(false);
   }
@@ -582,10 +603,7 @@ export default function App() {
                 className="select-field" 
                 style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
                 value={activeRole} 
-                onChange={e => {
-                  setActiveRole(e.target.value);
-                  vibrate('medium');
-                }}
+                onChange={e => handleRoleChange(e.target.value)}
               >
                 {ROLES_LIST.map(r => (
                   <option key={r.key} value={r.key}>{r.label}</option>
