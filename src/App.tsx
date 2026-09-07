@@ -21,11 +21,11 @@ const DOCUMENT_TYPES = [
   'Акт дефектации'
 ];
 
-const SHOPS = [
-  { key: 'bogie', label: 'Тележечный цех', defaultMaster: 'Иванов И.И.' },
-  { key: 'wheels', label: 'Колёсный цех', defaultMaster: 'Петров П.П.' },
-  { key: 'brakes', label: 'Автотормозной цех', defaultMaster: 'Сидоров С.С.' },
-  { key: 'body', label: 'Кузовной / Сварочный', defaultMaster: 'Кузнецов К.К.' }
+const DEFAULT_SHOPS = [
+  { key: 'bogie', label: 'Тележечный цех' },
+  { key: 'wheels', label: 'Колёсный цех' },
+  { key: 'brakes', label: 'Автотормозной цех' },
+  { key: 'body', label: 'Кузовной / Сварочный' }
 ];
 
 export default function App() {
@@ -39,6 +39,14 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
+  // Управление ответственными за цеха
+  const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string }>>({
+    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.' },
+    wheels: { label: 'Колёсный цех', master: 'Петров П.П.' },
+    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.' },
+    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.' }
+  });
+
   const [selectedCase, setSelectedCase] = useState<any>(null);
   const [selectedMetrics, setSelectedMetrics] = useState<RepairTimeMetrics | null>(null);
   const [statusHistory, setStatusHistory] = useState<any[]>([]);
@@ -87,11 +95,11 @@ export default function App() {
       if (dbUser) {
         setUser(dbUser);
       } else {
-        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'PENDING' }]).select().single();
+        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'ADMIN' }]).select().single();
         setUser(newUser);
       }
     } else {
-      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Диспетчер', role: 'DISPATCHER' });
+      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Начальник депо', role: 'ADMIN' });
     }
     loadData();
   }
@@ -107,12 +115,38 @@ export default function App() {
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
 
+    // Загрузка динамических мастеров цехов
+    const { data: mastersData } = await supabase.from('shop_masters').select('*');
+    if (mastersData && mastersData.length > 0) {
+      const mapped: any = {};
+      mastersData.forEach((m: any) => {
+        mapped[m.shop_key] = { label: m.shop_name, master: m.master_name };
+      });
+      setShopMasters(mapped);
+    }
+
     if (metrics) setTimeMetricsList(metrics);
     if (repairData) {
       setRepairs(repairData);
       setDelayLogs(delays || []);
       setDqViolations(runDataQualityChecks(repairData, delays || []));
     }
+  }
+
+  // Сохранение настроек мастеров из профиля
+  async function handleSaveMasters() {
+    setLoading(true); vibrate('heavy');
+    for (const [key, val] of Object.entries(shopMasters)) {
+      await supabase.from('shop_masters').upsert({
+        shop_key: key,
+        shop_name: val.label,
+        master_name: val.master,
+        updated_at: new Date().toISOString()
+      });
+    }
+    alert('Ответственные за цеха успешно обновлены!');
+    setLoading(false);
+    loadData();
   }
 
   async function openCaseDetails(item: any) {
@@ -170,8 +204,9 @@ export default function App() {
   async function handleSignAct(shopKey: string) {
     if (!selectedCase) return;
     setLoading(true);
+    const masterName = shopMasters[shopKey]?.master || user?.name || 'Мастер цеха';
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', {
-      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: user?.name || 'Мастер цеха'
+      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: masterName
     });
     if (!error) {
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
@@ -180,9 +215,10 @@ export default function App() {
     setLoading(false);
   }
 
-  async function handleUpdateShopStage(shopKey: string, status: string, masterName: string) {
+  async function handleUpdateShopStage(shopKey: string, status: string) {
     if (!selectedCase) return;
     setLoading(true);
+    const masterName = shopMasters[shopKey]?.master || 'Мастер цеха';
     const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', {
       p_repair_id: selectedCase.repair_id,
       p_shop_key: shopKey,
@@ -278,9 +314,8 @@ export default function App() {
   const krCycle = calculateCyclePercentiles(krHours);
 
   const isInitialPhase = selectedCase && ['01 PLANNED', '04 QUEUE'].includes(selectedCase.current_status);
-  const allSigned = selectedCase?.shop_signatures && SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+  const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
 
-  // Расчёт времени на текущем цеховом этапе
   const getShopDuration = (startAt: string | null) => {
     if (!startAt) return '0 ч';
     const hours = Math.max(0, (new Date().getTime() - new Date(startAt).getTime()) / (1000 * 60 * 60));
@@ -402,10 +437,47 @@ export default function App() {
           </>
         )}
 
+        {/* ПРОФИЛЬ: Управление ответственными за цеха */}
         {currentTab === 'profile' && (
-          <div className="premium-card" style={{ textAlign: 'center' }}>
-            <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль: {user?.role}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div className="premium-card" style={{ textAlign: 'center' }}>
+              <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль: <b>{user?.role || 'ADMIN'}</b></p>
+            </div>
+
+            <div className="premium-card">
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
+                ⚙️ Назначение ответственных за цеха
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {Object.entries(shopMasters).map(([key, val]) => (
+                  <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                    <label style={{ fontSize: '11px', fontWeight: 'bold' }}>{val.label}</label>
+                    <input 
+                      className="input-field" 
+                      style={{ margin: 0, padding: '6px 10px', fontSize: '11px' }} 
+                      type="text" 
+                      value={val.master} 
+                      onChange={e => {
+                        setShopMasters({
+                          ...shopMasters,
+                          [key]: { ...val, master: e.target.value }
+                        });
+                      }} 
+                      placeholder="ФИО Ответственного" 
+                    />
+                  </div>
+                ))}
+                <button 
+                  className="btn-primary" 
+                  style={{ marginTop: '8px' }} 
+                  onClick={handleSaveMasters} 
+                  disabled={loading}
+                >
+                  💾 Сохранить ответственных
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -494,15 +566,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ (Для режима "В ремонте") */}
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ (Динамические мастера из админки) */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
                   🏗️ Этапы ремонта и Ответственные цехов
                 </h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {SHOPS.map(s => {
-                    const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING', master: s.defaultMaster };
+                  {DEFAULT_SHOPS.map(s => {
+                    const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
+                    const masterName = shopMasters[s.key]?.master || 'Мастер не назначен';
                     const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
 
@@ -518,7 +591,7 @@ export default function App() {
                             {s.label} {isCurrent && <span style={{ color: 'var(--brand-color)', fontSize: '10px' }}>(В работе: {getShopDuration(prog.start_at)})</span>}
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            Мастер: <b>{prog.master || s.defaultMaster}</b>
+                            Ответственный: <b>{masterName}</b>
                           </div>
                         </div>
 
@@ -526,11 +599,11 @@ export default function App() {
                           {isDone ? (
                             <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
                           ) : isCurrent ? (
-                            <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE', prog.master || s.defaultMaster)} disabled={loading}>
+                            <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>
                               Завершить
                             </button>
                           ) : (
-                            <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS', prog.master || s.defaultMaster)} disabled={loading}>
+                            <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
                               Начать
                             </button>
                           )}
@@ -548,17 +621,17 @@ export default function App() {
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {SHOPS.map(s => {
+                    {DEFAULT_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
+                      const assignedMaster = shopMasters[s.key]?.master || 'Мастер';
                       return (
                         <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
-                            {sig?.signed && (
-                              <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                                Подписал: <b>{sig.master_name}</b> {sig.signed_at && `• ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
-                              </div>
-                            )}
+                            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Ответственный: <b>{sig?.master_name || assignedMaster}</b>
+                              {sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                            </div>
                           </div>
                           {sig?.signed ? (
                             <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span>
