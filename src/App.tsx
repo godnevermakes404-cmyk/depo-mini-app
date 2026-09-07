@@ -14,7 +14,7 @@ import './App.css';
 
 declare global { interface Window { Telegram: any; } }
 
-// --- ТИПИЗАЦИЯ (TypeScript Interfaces) ---
+// --- ТИПИЗАЦИЯ ---
 type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 
 export const CASE_STATUS = {
@@ -25,75 +25,32 @@ export const CASE_STATUS = {
   READY: '11 READY_TO_DISPATCH'
 } as const;
 
-interface Wagon {
-  wagon_number: string;
-  owner: string;
-  owner_type: string;
-}
-
-interface Contract {
-  customer_name: string;
-  sla_hours: number;
-}
-
+interface Wagon { wagon_number: string; owner: string; owner_type: string; }
+interface Contract { customer_name: string; sla_hours: number; }
 interface RepairCase {
-  repair_id: string;
-  current_status: string;
-  repair_type: string;
-  created_at: string;
-  sla_deadline: string | null;
-  planned_release: string | null;
-  forecast_release: string | null;
-  track_number: string | null;
-  position_number: string | null;
-  shop_signatures: Record<string, any>;
-  shop_progress: Record<string, any>;
-  current_shop: string | null;
-  contracts: Contract | any;
-  wagons: Wagon | any;
+  repair_id: string; current_status: string; repair_type: string; created_at: string;
+  sla_deadline: string | null; planned_release: string | null; forecast_release: string | null;
+  track_number: string | null; position_number: string | null;
+  shop_signatures: Record<string, any>; shop_progress: Record<string, any>; current_shop: string | null;
+  contracts: Contract | any; wagons: Wagon | any;
 }
-
 interface DelayLog {
-  id: string;
-  repair_id: string;
-  category: string;
-  delay_type: string;
-  cause: string;
-  responsible_party: string;
-  start_datetime: string;
-  end_datetime: string | null;
-  next_action: string | null;
+  id: string; repair_id: string; category: string; delay_type: string; cause: string;
+  responsible_party: string; start_datetime: string; end_datetime: string | null; next_action: string | null;
 }
+interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 
-interface ShopMasterConfig {
-  label: string;
-  master: string;
-  tg: string;
-  role: string;
-  targetHours: number;
-}
-
-const DOCUMENT_TYPES = [
-  'Справка ВУ 36М',
-  'АКТ ВУ-23 (Ремонт завершен)',
-  'АКТ ВУ-22 (Дефектная ведомость)',
-  'Справка 2612',
-  'Справка 2602',
-  'Акт дефектации'
-];
-
+const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
   { key: 'brakes', label: 'Автотормозной цех' },
   { key: 'body', label: 'Кузовной / Сварочный' }
 ];
-
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
-
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
@@ -138,7 +95,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
 
-  // Формы задержек
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
   const [delayType, setDelayType] = useState<'PRIMARY' | 'SECONDARY'>('PRIMARY');
@@ -147,13 +103,11 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // Формы регистрации
   const [wagonNumbersInput, setWagonNumbersInput] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
   const [owner, setOwner] = useState('ПРОМТРАНС');
   const [ownerType, setOwnerType] = useState('Own');
-  
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
 
@@ -167,23 +121,17 @@ export default function App() {
     let tgUser: any = null;
     try {
       const tg = window.Telegram?.WebApp || WebApp;
-      if (tg) {
-        tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color');
-        tgUser = tg.initDataUnsafe?.user;
-      }
+      if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color'); tgUser = tg.initDataUnsafe?.user; }
     } catch (e) {}
 
     if (!tgUser?.id) { setIsOutsideTelegram(true); return; }
 
     const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
-    
     if (dbUser) {
-      setUser(dbUser);
-      setActiveRole(dbUser.role || 'GUEST');
+      setUser(dbUser); setActiveRole(dbUser.role || 'GUEST');
     } else {
       const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }]).select().single();
-      setUser(newUser);
-      setActiveRole('GUEST');
+      setUser(newUser); setActiveRole('GUEST');
     }
     loadData();
   }
@@ -198,16 +146,11 @@ export default function App() {
 
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
-
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
+    
     if (mastersData && mastersData.length > 0) {
       const mapped: Record<string, ShopMasterConfig> = {};
-      mastersData.forEach((m: any) => {
-        mapped[m.shop_key] = { 
-          label: m.shop_name, master: m.master_name, tg: m.telegram_handle || '@master',
-          role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4)
-        };
-      });
+      mastersData.forEach((m: any) => { mapped[m.shop_key] = { label: m.shop_name, master: m.master_name, tg: m.telegram_handle || '@master', role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4) }; });
       setShopMasters(prev => ({ ...prev, ...mapped }));
     }
 
@@ -221,42 +164,26 @@ export default function App() {
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
-
-  const getMasterLabel = (shopKey: string) => {
-    const info = shopMasters[shopKey];
-    return info ? `${info.master} (${info.tg})`.trim() : 'Мастер';
-  };
-
-  const escapeCsvCell = (str: any) => {
-    if (str == null) return '""';
-    return `"${String(str).replace(/"/g, '""')}"`;
-  };
+  const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
+  const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
-      await supabase.from('shop_masters').upsert({
-        shop_key: key, shop_name: val.label, master_name: val.master, telegram_handle: val.tg,
-        role_code: val.role, target_hours: val.targetHours, updated_at: new Date().toISOString()
-      });
+      await supabase.from('shop_masters').upsert({ shop_key: key, shop_name: val.label, master_name: val.master, telegram_handle: val.tg, role_code: val.role, target_hours: val.targetHours, updated_at: new Date().toISOString() });
     }
     alert('Персонал сохранен!'); setLoading(false); loadData();
   }
 
   async function openCaseDetails(item: RepairCase) {
-    vibrate('light');
-    setSelectedCase(item);
-    
+    vibrate('light'); setSelectedCase(item);
     const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
     if (timeMetrics) {
       const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
       const paused = Math.max(0, Number(timeMetrics.paused_hours || 0));
       setSelectedMetrics({
-        total_dwell_hours: Number(Number(timeMetrics.total_dwell_hours || 0).toFixed(1)),
-        queue_hours: Number(Number(timeMetrics.queue_hours || 0).toFixed(1)),
-        gross_repair_hours: Number(gross.toFixed(1)),
-        paused_hours: Number(paused.toFixed(1)),
-        net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
+        total_dwell_hours: Number(Number(timeMetrics.total_dwell_hours || 0).toFixed(1)), queue_hours: Number(Number(timeMetrics.queue_hours || 0).toFixed(1)),
+        gross_repair_hours: Number(gross.toFixed(1)), paused_hours: Number(paused.toFixed(1)), net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
       } as RepairTimeMetrics);
     } else { setSelectedMetrics(null); }
 
@@ -269,163 +196,87 @@ export default function App() {
   async function handleCreateRepair() {
     const numbers = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8);
     if (numbers.length === 0) { alert('Введите корректные 8-значные номера вагонов!'); return; }
-
     setLoading(true); vibrate('medium');
-    let successCount = 0;
-    const addedWagons: string[] = [];
-    let lastDbError = '';
+    let successCount = 0; const addedWagons: string[] = []; let lastDbError = '';
 
     for (const num of numbers) {
-      const { error } = await supabase.rpc('create_repair_case', {
-        p_wagon_number: num, p_repair_type: repairType, p_user_id: user?.id,
-        p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType
-      });
-      
-      if (!error) { 
-        successCount++; 
-        addedWagons.push(num); 
-      } else {
-        console.error("RPC Error:", error);
-        lastDbError = error.message;
-      }
+      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: repairType, p_user_id: user?.id, p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType });
+      if (!error) { successCount++; addedWagons.push(num); } else { lastDbError = error.message; }
     }
     
     if (successCount > 0) { 
-      if (addedWagons.length === 1) { notifyWagonArrived(addedWagons[0], repairType, owner, wagonType); } 
-      else { notifyWagonsArrivedBulk(addedWagons, repairType, owner, wagonType); }
-      
-      alert(`Успешно принято вагонов на территорию: ${successCount} шт.`);
-      setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
-    } else { 
-      alert(`Ошибка БД:\n${lastDbError}`); 
-    }
+      if (addedWagons.length === 1) notifyWagonArrived(addedWagons[0], repairType, owner, wagonType); 
+      else notifyWagonsArrivedBulk(addedWagons, repairType, owner, wagonType);
+      alert(`Успешно принято вагонов: ${successCount} шт.`); setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
+    } else { alert(`Ошибка БД:\n${lastDbError}`); }
     setLoading(false);
   }
 
   async function handleSignAct(shopKey: string) {
-    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка: Подписать может только ${shopMasters[shopKey]?.label} или Админ.`); return; }
+    if (!canPerformAction(shopKey)) return;
     if (!selectedCase) return;
     setLoading(true);
-    
     const signLabel = getMasterLabel(shopKey);
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel, p_user_id: user?.id });
-    
-    if (!error) {
-      notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel);
-      setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
-      loadData();
-    } else { alert('Ошибка подписи: ' + error.message); }
+    if (!error) { notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs }); loadData(); }
     setLoading(false);
   }
 
   async function handleUpdateShopStage(shopKey: string, status: string) {
-    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка: Отмечать этапы может только ${shopMasters[shopKey]?.label} или Админ.`); return; }
-    if (!selectedCase) return;
+    if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
-
     const masterLabel = getMasterLabel(shopKey);
-    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', {
-      p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: user?.id
-    });
-
-    if (!error) {
-      notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel);
-      setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
-      loadData();
-    } else { alert('Ошибка этапа: ' + error.message); }
+    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: user?.id });
+    if (!error) { notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey }); loadData(); }
     setLoading(false);
   }
 
   async function handleAssignPosition(toRepair: boolean) {
-    if (activeRole !== 'ADMIN' && activeRole !== 'operator') { 
-      alert('⛔ Только Оператор / Диспетчер может размещать вагоны.'); 
-      return; 
-    }
+    if (activeRole !== 'ADMIN' && activeRole !== 'operator') return; 
     if (!selectedCase) return;
     setLoading(true);
-    
-    const { error } = await supabase.rpc('assign_repair_position', {
-      p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id
-    });
-    
-    if (!error) { 
-      notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position);
-      setSelectedCase(null); loadData(); 
-    } else { alert('Ошибка назначения: ' + error.message); }
+    const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id });
+    if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
     setLoading(false);
   }
 
   async function handleAddDocument() {
-    if (activeRole !== 'ADMIN' && activeRole !== 'docs') { alert('⛔ Только Оформитель или Админ.'); return; }
+    if (activeRole !== 'ADMIN' && activeRole !== 'docs') return;
     if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
-    
-    const { error } = await supabase.from('documents').insert([{
-      repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0]
-    }]);
-    
-    if (!error) {
-      setDocNumber('');
-      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
-      setDocuments(docs || []);
-    }
+    const { error } = await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0] }]);
+    if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); }
     setLoading(false);
   }
 
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
     if (newStatus === CASE_STATUS.PAUSED) { 
-      // 🎯 Автоподстановка закупщика при открытии задержки (Материалы по умолчанию)
       setDelayCategory('Materials');
       const supplyInfo = shopMasters.procurement;
-      setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения / Закупки');
-      setDelayCause('');
-      setNextAction('');
-      setShowDelayModal(true); 
-      return; 
+      setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения');
+      setDelayCause(''); setNextAction(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
-    
-    const { error } = await supabase.rpc('change_repair_status', {
-      p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}`
-    });
-    
-    if (!error) { 
-      notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus);
-      setSelectedCase(null); loadData(); 
-    } else { alert('Ошибка смены статуса: ' + error.message); }
+    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
+    if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
+    else { alert('Ошибка: ' + error.message); }
     setLoading(false);
   }
 
   async function handleConfirmDelay() {
-    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля задержки!'); return; }
+    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
     setLoading(true); vibrate('heavy');
-    
-    const { error } = await supabase.rpc('register_delay', {
-      p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType,
-      p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction,
-      p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id
-    });
-    
-    if (!error) {
-      notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction);
-      setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); setActionDeadline(''); loadData();
-    } else { alert('Ошибка задержки: ' + error.message); }
+    const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id });
+    if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); loadData(); }
     setLoading(false);
   }
 
   function exportToCSV() {
     const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'SLA Deadline', 'Forecast Release'];
-    const rows = filteredRepairs.map(r => [
-      escapeCsvCell(r.wagons?.wagon_number), escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), 
-      escapeCsvCell(r.repair_type), escapeCsvCell(r.wagons?.owner),
-      escapeCsvCell(r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''), 
-      escapeCsvCell(r.forecast_release ? new Date(r.forecast_release).toLocaleString() : '')
-    ]);
+    const rows = filteredRepairs.map(r => [ escapeCsvCell(r.wagons?.wagon_number), escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), escapeCsvCell(r.repair_type), escapeCsvCell(r.wagons?.owner), escapeCsvCell(r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''), escapeCsvCell(r.forecast_release ? new Date(r.forecast_release).toLocaleString() : '') ]);
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const link = document.createElement('a'); link.setAttribute('href', encodeURI(csvContent));
-    link.setAttribute('download', `depo_wagons_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    const link = document.createElement('a'); link.setAttribute('href', encodeURI(csvContent)); link.setAttribute('download', `depo_wagons_${new Date().toISOString().split('T')[0]}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }
 
   const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
@@ -433,44 +284,38 @@ export default function App() {
   const lostWagonDays = calculateLostWagonDays(delayLogs);
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
-  
   const drHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'ДР').map(m => Number(m.total_dwell_hours || 0));
   const krHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'КР').map(m => Number(m.total_dwell_hours || 0));
-  const drCycle = calculateCyclePercentiles(drHours);
-  const krCycle = calculateCyclePercentiles(krHours);
+  const drCycle = calculateCyclePercentiles(drHours); const krCycle = calculateCyclePercentiles(krHours);
 
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
-
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
+
+  // РОЛЕВЫЕ ФЛАГИ ДЛЯ UI
+  const isAdminOrOperator = activeRole === 'ADMIN' || activeRole === 'operator';
+  const isAdminOrDocs = activeRole === 'ADMIN' || activeRole === 'docs';
+  // Мастера видят только кнопку "Задержать", админы/операторы видят все статусы
+  const visibleTransitions = isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
     const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
     if (!startTime) return { text: `Норма: ${targetHours} ч`, isOverdue: false };
     const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
-    const isOverdue = hoursSpent > targetHours;
-    const timeFormatted = hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`;
-    return { text: `${timeFormatted} / Норма: ${targetHours} ч`, isOverdue };
+    return { text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин / Норма: ${targetHours} ч` : `${hoursSpent.toFixed(1)} ч / Норма: ${targetHours} ч`, isOverdue: hoursSpent > targetHours };
   };
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
   if (isOutsideTelegram) {
-    return (
-      <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', textAlign: 'center', padding: '20px' }}>
-        <div><h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div>
-      </div>
-    );
+    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
   }
 
   return (
     <div>
-      <header className="brand-header">
-        <h1 className="brand-title">ДЕПО TMS</h1>
-        <span className="status-pill">{user?.name}</span>
-      </header>
+      <header className="brand-header"><h1 className="brand-title">ДЕПО TMS</h1><span className="status-pill">{user?.name}</span></header>
 
       <div className="content-area">
         {currentTab === 'home' && (
@@ -485,28 +330,13 @@ export default function App() {
                 </div>
               </div>
             )}
-
             <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length}</h3>
-            
             <div className="stats-grid">
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}>
-                <span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span>
-              </div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}>
-                <span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
-              </div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>
-                <span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
-              </div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}>
-                <span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span>
-                <span className="stat-value">{readyNotDispatched.length}</span>
-              </div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
             </div>
-
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>🗺️ Схема ремонтных путей депо</h4>
               <div className="tracks-grid">
@@ -536,40 +366,20 @@ export default function App() {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <h3 style={{ margin: 0, fontSize: '16px' }}>{statusFilter ? `Фильтр: ${STATUS_RU[statusFilter]}` : 'Все вагоны'}</h3>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {statusFilter && <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setStatusFilter(null)}>Сброс</button>}
-                <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
-              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>{statusFilter && <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setStatusFilter(null)}>Сброс</button>}<button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button></div>
             </div>
-
             {filteredRepairs.map((item) => {
               const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
               const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
-
               return (
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
-                    <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{item.repair_type} • {item.wagons?.owner}</span>
-                    <span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>
-                      {isBreached ? '⚠️ Риск SLA' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
-                    </span>
-                  </div>
-                  {activeDelay && (
-                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}>
-                      <div><b>⛔ {activeDelay.category}:</b> {activeDelay.cause}</div>
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск SLA' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
+                  {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {activeDelay.category}:</b> {activeDelay.cause}</div></div>}
                 </div>
               );
             })}
-            
-            {(activeRole === 'ADMIN' || activeRole === 'security') && (
-              <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
-            )}
+            {(activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
           </>
         )}
 
@@ -585,10 +395,7 @@ export default function App() {
             <div className="premium-card">
               <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
-                <div key={cat} style={{ marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div>
-                  <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div>
-                </div>
+                <div key={cat} style={{ marginBottom: '8px' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div><div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div></div>
               ))}
             </div>
           </>
@@ -600,7 +407,6 @@ export default function App() {
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />{user?.role === 'ADMIN' && <span style={{color: 'var(--brand-color)'}}>Симуляция: {currentRoleInfo?.label}</span>}</p>
             </div>
-
             {user?.role === 'ADMIN' ? (
               <>
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
@@ -609,7 +415,6 @@ export default function App() {
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </div>
-
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>⚙️ Персонал и Нормативы ремонта цехов</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -632,11 +437,7 @@ export default function App() {
                   </div>
                 </div>
               </>
-            ) : (
-              <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>
-                🔒 Панель управления доступна только Начальнику депо.
-              </div>
-            )}
+            ) : (<div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>🔒 Панель управления доступна только Начальнику депо.</div>)}
           </div>
         )}
       </div>
@@ -653,42 +454,24 @@ export default function App() {
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
-            <textarea 
-              className="textarea-field" 
-              value={wagonNumbersInput} 
-              onChange={e => setWagonNumbersInput(e.target.value)} 
-              placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)"
-              rows={3}
-            />
-            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>
-              Распознано вагонов: {parsedWagonsCount} шт.
-            </div>
-
+            <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)" rows={3} />
+            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option><option>Крытый</option><option>Переоборудованный</option></select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>КР</option><option>ДР</option><option>ТР</option><option>КРП</option><option>ДРП</option></select>
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
-            
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
-              <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>
-                Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}
-              </button>
-            </div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button><button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}</button></div>
           </div>
         </div>
       )}
 
-      {/* Модалка Вагона */}
+      {/* Универсальная Модалка Вагона */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
             <div className="sheet-handle"></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
-                <span className="status-pill" style={{ color: 'var(--brand-color)' }}>{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
-              </div>
+              <div><h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3><span className="status-pill" style={{ color: 'var(--brand-color)' }}>{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span></div>
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
@@ -696,10 +479,8 @@ export default function App() {
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Вид ремонта:</span>
                 <select className="select-field" style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} value={selectedCase.repair_type || 'ДР'} onChange={async (e) => {
-                    const newType = e.target.value;
-                    setSelectedCase({ ...selectedCase, repair_type: newType });
-                    await supabase.from('repair_cases').update({ repair_type: newType }).eq('repair_id', selectedCase.repair_id);
-                    loadData();
+                    const newType = e.target.value; setSelectedCase({ ...selectedCase, repair_type: newType });
+                    await supabase.from('repair_cases').update({ repair_type: newType }).eq('repair_id', selectedCase.repair_id); loadData();
                   }}>
                   <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
                 </select>
@@ -720,19 +501,17 @@ export default function App() {
                     const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
 
                     return (
-                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isCurrent ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', borderLeft: isCurrent ? '3px solid var(--brand-color)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px', opacity: canEdit ? 1 : 0.65 }}>
+                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isCurrent ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', borderLeft: isCurrent ? '3px solid var(--brand-color)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>{s.label}
                             <span style={{ color: timeInfo.isOverdue ? 'var(--danger)' : isCurrent ? 'var(--brand-color)' : 'var(--text-muted)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
                               ({isCurrent ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
                             </span>
                           </div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)
-                          </div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
                         </div>
                         <div>
-                          {isDone ? <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span> : isCurrent ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: canEdit ? 'var(--brand-color)' : '#aaa' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading || !canEdit}>{canEdit ? 'Завершить' : '🔒'}</button> : <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading || !canEdit}>{canEdit ? 'Начать' : '🔒'}</button>}
+                          {isDone ? <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span> : isCurrent ? (canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand-color)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>) : (canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>⏳ Ожидает</span>)}
                         </div>
                       </div>
                     );
@@ -751,33 +530,36 @@ export default function App() {
                       const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                       const canEdit = canPerformAction(s.key);
                       return (
-                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px', opacity: canEdit ? 1 : 0.65 }}>
+                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
-                            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                              Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg})
-                              {sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
-                            </div>
+                            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg}){sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
                           </div>
-                          {sig?.signed ? <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span> : <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px', background: canEdit ? 'var(--brand-color)' : '#aaa' }} onClick={() => handleSignAct(s.key)} disabled={loading || !canEdit}>{canEdit ? 'Подписать' : '🔒'}</button>}
+                          {sig?.signed ? <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span> : (canEdit ? <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key)} disabled={loading}>Подписать</button> : <span style={{ color: 'var(--warning)', fontSize: '10px' }}>⏳ Ожидает</span>)}
                         </div>
                       );
                     })}
                   </div>
                 </div>
 
+                {/* ШАГ 2 СКРЫТ ОТ МАСТЕРОВ, ОНИ ВИДЯТ ТОЛЬКО ТЕКСТ. ОПЕРАТОРЫ ВИДЯТ КНОПКИ */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
                   {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
                   {!allSigned && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px' }}>⚠️ Завоз доступен после подписи акта всеми мастерами.</div>}
-                  <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                    <select className="select-field" style={{ margin: 0 }} value={track} onChange={e => setTrack(e.target.value)}><option value="Путь 1">Путь №1</option><option value="Путь 2">Путь №2</option></select>
-                    <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || (activeRole !== 'ADMIN' && activeRole !== 'operator')}>⏳ В очередь</button>
-                    <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || (activeRole !== 'ADMIN' && activeRole !== 'operator')}>➡️ Завезти на путь</button>
-                  </div>
+                  
+                  {isAdminOrOperator && (
+                    <>
+                      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                        <select className="select-field" style={{ margin: 0 }} value={track} onChange={e => setTrack(e.target.value)}><option value="Путь 1">Путь №1</option><option value="Путь 2">Путь №2</option></select>
+                        <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px' }}>
+                        <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned}>⏳ В очередь</button>
+                        <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned}>➡️ Завезти на путь</button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
             ) : (
@@ -786,39 +568,39 @@ export default function App() {
                   <div className="premium-card">
                     <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Модель времени (Time Model)</h4>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
-                      <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div>
-                      <div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
-                      <div>Грязный ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div>
-                      <div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
+                      <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
+                      <div>Грязный ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
                     </div>
-                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Чистый ремонт (Net):</span><b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b>
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт (Net):</span><b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
+                  </div>
+                )}
+                
+                {/* СТАТУСЫ: МАСТЕРА ВИДЯТ ТОЛЬКО КНОПКУ "ЗАДЕРЖАТЬ" */}
+                {visibleTransitions.length > 0 && (
+                  <div className="premium-card">
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия:</h4>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {visibleTransitions.map((st: string) => <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto', background: st === CASE_STATUS.PAUSED ? 'var(--danger)' : 'var(--brand-color)' }}>{st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}</button>)}
                     </div>
                   </div>
                 )}
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия (State Machine):</h4>
-                  {availableTransitions.length === 0 ? <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Цепочка завершена</p> : (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {availableTransitions.map((st: string) => <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto' }}>→ {STATUS_RU[st] || st}</button>)}
-                    </div>
-                  )}
-                </div>
+
                 <div className="premium-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
                     {documents.map((d: any) => (
-                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
-                        <span><b>{d.doc_type}</b> №{d.doc_number}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span>
-                      </div>
+                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}><span><b>{d.doc_type}</b> №{d.doc_number}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span></div>
                     ))}
                   </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>{DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}</select>
-                    <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
-                    <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
-                  </div>
+                  {isAdminOrDocs && (
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>{DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}</select>
+                      <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+                      <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
+                    </div>
+                  )}
                 </div>
+                
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -843,40 +625,18 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
             <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}><option value="PRIMARY">PRIMARY</option><option value="SECONDARY">SECONDARY</option></select>
-            
-            <select 
-              className="select-field" 
-              value={delayCategory} 
-              onChange={e => {
-                const cat = e.target.value;
-                setDelayCategory(cat);
-                
-                // 🎯 Умная автоподстановка ответственного
-                if (cat === 'Materials') {
-                  const info = shopMasters.procurement;
-                  setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки');
-                } else if (cat === 'Equipment') {
-                  const info = shopMasters.mechanic;
-                  setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Служба главного механика');
-                } else {
-                  setResponsibleParty('');
-                }
-              }}
-            >
-              <option value="Materials">Материалы / Запчасти</option>
-              <option value="Equipment">Поломка оборудования</option>
-              <option value="Customer">Заказчик</option>
-              <option value="Railway">ЖД</option>
+            <select className="select-field" value={delayCategory} onChange={e => {
+                const cat = e.target.value; setDelayCategory(cat);
+                if (cat === 'Materials') { const info = shopMasters.procurement; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки'); } 
+                else if (cat === 'Equipment') { const info = shopMasters.mechanic; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Служба главного механика'); } 
+                else { setResponsibleParty(''); }
+              }}>
+              <option value="Materials">Материалы / Запчасти</option><option value="Equipment">Поломка оборудования</option><option value="Customer">Заказчик</option><option value="Railway">ЖД</option>
             </select>
-
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
-            
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
-              <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
-              <button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button>
-            </div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
           </div>
         </div>
       )}
