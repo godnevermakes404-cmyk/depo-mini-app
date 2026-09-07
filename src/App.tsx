@@ -269,13 +269,21 @@ export default function App() {
     setLoading(true); vibrate('medium');
     let successCount = 0;
     const addedWagons: string[] = [];
+    let lastDbError = ''; // Сохраняем реальную ошибку
 
     for (const num of numbers) {
       const { error } = await supabase.rpc('create_repair_case', {
         p_wagon_number: num, p_repair_type: repairType, p_user_id: user?.id,
         p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType
       });
-      if (!error) { successCount++; addedWagons.push(num); }
+      
+      if (!error) { 
+        successCount++; 
+        addedWagons.push(num); 
+      } else {
+        console.error("RPC Error:", error);
+        lastDbError = error.message; // Запоминаем причину сбоя
+      }
     }
     
     if (successCount > 0) { 
@@ -284,7 +292,10 @@ export default function App() {
       
       alert(`Успешно принято вагонов на территорию: ${successCount} шт.`);
       setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
-    } else { alert('Ошибка добавления. Проверьте ваши права (Только Охрана или Админ).'); }
+    } else { 
+      // 🚨 ВЫВОДИМ РЕАЛЬНУЮ ОШИБКУ ОТ POSTGRES
+      alert(`Ошибка БД:\n${lastDbError}\n\nСкиньте скриншот этого сообщения.`); 
+    }
     setLoading(false);
   }
 
