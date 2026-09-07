@@ -103,9 +103,6 @@ export default function App() {
   const [actionDeadline, setActionDeadline] = useState('');
 
   const [wagonNumbersInput, setWagonNumbersInput] = useState('');
-  const [wagonType, setWagonType] = useState('Полувагон');
-  const [repairType, setRepairType] = useState('ДР');
-  const [owner, setOwner] = useState('ПРОМТРАНС');
   const [ownerType, setOwnerType] = useState('Own');
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
@@ -166,7 +163,6 @@ export default function App() {
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
-  // 🔒 СОХРАНЕНИЕ ПЕРСОНАЛА ЧЕРЕЗ RPC (Больше никаких прямых UPSERT)
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
@@ -202,14 +198,25 @@ export default function App() {
     setLoading(true); vibrate('medium');
     let successCount = 0; const addedWagons: string[] = []; let lastDbError = '';
 
+    const defaultWagonType = 'Полувагон';
+    const defaultRepairType = 'ДР';
+    const defaultOwner = ownerType === 'Own' ? 'ПРОМТРАНС' : 'Сторонний';
+
     for (const num of numbers) {
-      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: repairType, p_user_id: user?.id, p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType });
+      const { error } = await supabase.rpc('create_repair_case', { 
+        p_wagon_number: num, 
+        p_repair_type: defaultRepairType, 
+        p_user_id: user?.id, 
+        p_wagon_type: defaultWagonType, 
+        p_owner: defaultOwner, 
+        p_owner_type: ownerType 
+      });
       if (!error) { successCount++; addedWagons.push(num); } else { lastDbError = error.message; }
     }
     
     if (successCount > 0) { 
-      if (addedWagons.length === 1) notifyWagonArrived(addedWagons[0], repairType, owner, wagonType); 
-      else notifyWagonsArrivedBulk(addedWagons, repairType, owner, wagonType);
+      if (addedWagons.length === 1) notifyWagonArrived(addedWagons[0], defaultRepairType, defaultOwner, defaultWagonType); 
+      else notifyWagonsArrivedBulk(addedWagons, defaultRepairType, defaultOwner, defaultWagonType);
       alert(`Успешно принято вагонов: ${successCount} шт.`); setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
     } else { alert(`Ошибка БД:\n${lastDbError}`); }
     setLoading(false);
@@ -451,18 +458,26 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
+      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (УПРОЩЕННАЯ) */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
             <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)" rows={3} />
             <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
-            <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option><option>Крытый</option><option>Переоборудованный</option></select>
-            <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>КР</option><option>ДР</option><option>ТР</option><option>КРП</option><option>ДРП</option></select>
-            <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
-            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button><button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}</button></div>
+            
+            {/* ТОЛЬКО ВЫБОР СОБСТВЕННЫЙ / ЧУЖОЙ */}
+            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
+              <option value="Own">Собственный</option>
+              <option value="Third-party">Чужой</option>
+            </select>
+
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+              <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
+              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>
+                Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -480,8 +495,6 @@ export default function App() {
             <div className="premium-card">
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Вид ремонта:</span>
-                
-                {/* 🔒 СМЕНА ВИДА РЕМОНТА ЧЕРЕЗ НОВЫЙ RPC */}
                 <select 
                   className="select-field" 
                   style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
