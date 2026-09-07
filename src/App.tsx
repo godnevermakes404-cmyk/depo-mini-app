@@ -448,7 +448,7 @@ export default function App() {
 
             {isInitialPhase ? (
               <>
-                {/* ШАГ 1: Комиссионный Акт ВУ-22 */}
+                {/* ШАГ 1: Комиссионный Акт ВУ-22 с выводом ФИО и даты/времени подписи */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -458,7 +458,11 @@ export default function App() {
                         <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
-                            {sig?.signed && <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>Подписал: {sig.master_name}</div>}
+                            {sig?.signed && (
+                              <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                Подписал: <b>{sig.master_name}</b> {sig.signed_at && `• ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+                              </div>
+                            )}
                           </div>
                           {sig?.signed ? (
                             <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span>
@@ -471,9 +475,21 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ШАГ 2: Диспетчеризация */}
+                {/* ШАГ 2: Диспетчеризация и статус размещения вагона */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
+                  
+                  {/* Информация о текущем местоположении */}
+                  {selectedCase.track_number ? (
+                    <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
+                      📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
+                      ⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b>
+                    </div>
+                  )}
+
                   {!allSigned && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px' }}>⚠️ Завоз доступен после подписи акта всеми мастерами.</div>}
                   <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
                     <select className="select-field" style={{ margin: 0 }} value={track} onChange={e => setTrack(e.target.value)}><option value="Путь 1">Путь №1</option><option value="Путь 2">Путь №2</option></select>
