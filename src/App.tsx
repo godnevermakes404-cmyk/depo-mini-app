@@ -56,7 +56,7 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // Формы регистрации вагона (ВОССТАНОВЛЕНО ПОЛНОСТЬЮ)
+  // Формы регистрации вагона
   const [wagonNumber, setWagonNumber] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
@@ -148,7 +148,6 @@ export default function App() {
     }
     setLoading(true); vibrate('medium');
     
-    // Передаем все параметры
     const { error } = await supabase.rpc('create_repair_case', {
       p_wagon_number: wagonNumber, 
       p_repair_type: repairType, 
@@ -394,22 +393,36 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: Регистрация вагона (ВОССТАНОВЛЕННАЯ) */}
+      {/* Модалка: Регистрация вагона */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Регистрация вагона</h3>
             <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="Номер вагона (8 цифр)" />
+            
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}>
-              <option>Полувагон</option><option>Цистерна</option><option>Платформа</option>
+              <option>Полувагон</option>
+              <option>Цистерна</option>
+              <option>Платформа</option>
+              <option>Крытый</option>
+              <option>Переоборудованный</option>
             </select>
+            
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}>
-              <option>ТОР</option><option>ДР</option><option>КР</option><option>КРП</option>
+              <option>КР</option>
+              <option>ДР</option>
+              <option>ТР</option>
+              <option>КРП</option>
+              <option>ДРП</option>
             </select>
+            
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
+            
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
-              <option value="Own">Собственный</option><option value="Third-party">Сторонний</option>
+              <option value="Own">Собственный</option>
+              <option value="Third-party">Сторонний</option>
             </select>
+            
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
               <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Создать</button>
