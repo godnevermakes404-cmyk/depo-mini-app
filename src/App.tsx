@@ -99,6 +99,7 @@ const ROLES_LIST = [
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
   { key: 'procurement', label: '📦 Отдел снабжения / Закупки (Материалы)' },
+  { key: 'mechanic', label: '🛠 Служба главного механика (Оборудование)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
@@ -119,7 +120,8 @@ export default function App() {
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В. (Закупки)', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
+    mechanic: { label: 'Служба главного механика', master: 'Смирнов А.А.', tg: '@depo_mechanic', role: 'MECHANIC', targetHours: 0 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
@@ -373,10 +375,12 @@ export default function App() {
   async function handleUpdateStatus(newStatus: string) {
     if (!selectedCase) return;
     if (newStatus === CASE_STATUS.PAUSED) { 
-      // 🎯 Автоподстановка закупщика при открытии задержки по материалам
+      // 🎯 Автоподстановка закупщика при открытии задержки (Материалы по умолчанию)
       setDelayCategory('Materials');
       const supplyInfo = shopMasters.procurement;
       setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения / Закупки');
+      setDelayCause('');
+      setNextAction('');
       setShowDelayModal(true); 
       return; 
     }
@@ -615,7 +619,7 @@ export default function App() {
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} type="text" value={val.master} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} placeholder="ФИО" />
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} type="text" value={val.tg} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} placeholder="@username" />
-                          {key !== 'procurement' && (
+                          {key !== 'procurement' && key !== 'mechanic' && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
                               <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
                               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч.</span>
@@ -846,20 +850,28 @@ export default function App() {
               onChange={e => {
                 const cat = e.target.value;
                 setDelayCategory(cat);
+                
+                // 🎯 Умная автоподстановка ответственного
                 if (cat === 'Materials') {
-                  const supplyInfo = shopMasters.procurement;
-                  setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения / Закупки');
+                  const info = shopMasters.procurement;
+                  setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки');
+                } else if (cat === 'Equipment') {
+                  const info = shopMasters.mechanic;
+                  setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Служба главного механика');
+                } else {
+                  setResponsibleParty('');
                 }
               }}
             >
               <option value="Materials">Материалы / Запчасти</option>
+              <option value="Equipment">Поломка оборудования</option>
               <option value="Customer">Заказчик</option>
               <option value="Railway">ЖД</option>
             </select>
 
-            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки (например, нет цельнокатаных колёс)" />
+            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
-            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action (например, заказать со склада)" />
+            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
             
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button>
