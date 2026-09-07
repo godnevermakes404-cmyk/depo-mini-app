@@ -28,9 +28,19 @@ const DEFAULT_SHOPS = [
   { key: 'body', label: 'Кузовной / Сварочный' }
 ];
 
+const ROLES_LIST = [
+  { key: 'ADMIN', label: '👑 Начальник депо / Диспетчер (Полный доступ)' },
+  { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
+  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
+  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
+  { key: 'body', label: '🔨 Мастер Кузовного цеха' },
+  { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
+];
+
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
+  const [activeRole, setActiveRole] = useState<string>('ADMIN'); // Переключаемая роль
   const [showAddModal, setShowAddModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -39,13 +49,12 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<any[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // Управление ответственными и Telegram юзерами
   const [shopMasters, setShopMasters] = useState<Record<string, { label: string; master: string; tg: string }>>({
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie' },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels' },
     brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes' },
     body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body' },
-    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk' }
+    docs: { label: 'Оформитель актов', master: 'Анна Сергеевна', tg: '@depo_docs_clerk' }
   });
 
   const [selectedCase, setSelectedCase] = useState<any>(null);
@@ -100,7 +109,7 @@ export default function App() {
         setUser(newUser);
       }
     } else {
-      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Начальник депо', role: 'ADMIN' });
+      setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир', role: 'ADMIN' });
     }
     loadData();
   }
@@ -116,7 +125,6 @@ export default function App() {
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
 
-    // Загрузка динамических мастеров цехов и оформителя актов
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
     if (mastersData && mastersData.length > 0) {
       const mapped: any = {};
@@ -138,6 +146,11 @@ export default function App() {
     }
   }
 
+  // Проверка прав на выполнение действия в цехе
+  const canPerformAction = (targetShopKey: string) => {
+    return activeRole === 'ADMIN' || activeRole === targetShopKey;
+  };
+
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
@@ -149,7 +162,7 @@ export default function App() {
         updated_at: new Date().toISOString()
       });
     }
-    alert('Ответственные и Telegram аккаунты сохранены!');
+    alert('Ответственные сохранены!');
     setLoading(false);
     loadData();
   }
@@ -207,6 +220,11 @@ export default function App() {
   }
 
   async function handleSignAct(shopKey: string) {
+    if (!canPerformAction(shopKey)) {
+      alert(`⛔ Ошибка доступа: Подписать акт может только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
+      return;
+    }
+
     if (!selectedCase) return;
     setLoading(true);
     const masterInfo = shopMasters[shopKey];
@@ -223,6 +241,11 @@ export default function App() {
   }
 
   async function handleUpdateShopStage(shopKey: string, status: string) {
+    if (!canPerformAction(shopKey)) {
+      alert(`⛔ Ошибка доступа: Работы в цехе может отмечать только ${shopMasters[shopKey]?.label || 'соответствующий мастер'} или Админ.`);
+      return;
+    }
+
     if (!selectedCase) return;
     setLoading(true);
     const masterInfo = shopMasters[shopKey];
@@ -243,6 +266,11 @@ export default function App() {
   }
 
   async function handleAssignPosition(toRepair: boolean) {
+    if (activeRole !== 'ADMIN') {
+      alert('⛔ Завезти вагон на путь или отправить в очередь может только Диспетчер / Админ.');
+      return;
+    }
+
     if (!selectedCase) return;
     setLoading(true);
     const { error } = await supabase.rpc('assign_repair_position', {
@@ -257,6 +285,11 @@ export default function App() {
   }
 
   async function handleAddDocument() {
+    if (activeRole !== 'ADMIN' && activeRole !== 'docs') {
+      alert('⛔ Подгружать документы может только Оформитель актов или Админ.');
+      return;
+    }
+
     if (!docNumber.trim() || !selectedCase) { alert('Введите номер документа!'); return; }
     setLoading(true); vibrate('light');
     const { error } = await supabase.from('documents').insert([{
@@ -331,7 +364,7 @@ export default function App() {
     return hours < 1 ? `${Math.round(hours * 60)} мин` : `${hours.toFixed(1)} ч`;
   };
 
-  const docsClerk = shopMasters['docs'] || { master: 'Анна Сергеевна', tg: '@depo_docs_clerk' };
+  const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
   return (
     <div>
@@ -448,17 +481,47 @@ export default function App() {
           </>
         )}
 
-        {/* ПРОФИЛЬ: Управление персоналом и Telegram Аккаунтами */}
+        {/* ПРОФИЛЬ: ВЫБОР РОЛИ И НАСТРОЙКИ */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль: <b>{user?.role || 'ADMIN'}</b></p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                Текущая активная роль:
+              </p>
+              <div style={{ marginTop: '6px' }}>
+                <span className="status-pill" style={{ background: 'var(--brand-color)', color: '#fff', padding: '6px 12px', fontSize: '11px' }}>
+                  {currentRoleInfo?.label}
+                </span>
+              </div>
+            </div>
+
+            {/* ВЫБОР АКТИВНОЙ РОЛИ ДЛЯ ТЕСТИРОВАНИЯ ИЛИ РАБОТЫ */}
+            <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
+                🔑 Переключение рабочей роли
+              </h4>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 10px 0' }}>
+                Выберите от чьего имени вы сейчас работаете в системе. Права подписи будут ограничены выбранной ролью:
+              </p>
+              <select 
+                className="select-field" 
+                style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
+                value={activeRole} 
+                onChange={e => {
+                  setActiveRole(e.target.value);
+                  vibrate('medium');
+                }}
+              >
+                {ROLES_LIST.map(r => (
+                  <option key={r.key} value={r.key}>{r.label}</option>
+                ))}
+              </select>
             </div>
 
             <div className="premium-card">
               <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>
-                ⚙️ Ответственные и Telegram Юзеры
+                ⚙️ Назначение ответственных и Telegram аккаунтов
               </h4>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {Object.entries(shopMasters).map(([key, val]) => (
@@ -589,13 +652,15 @@ export default function App() {
                     const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                     const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
+                    const canEdit = canPerformAction(s.key);
 
                     return (
                       <div key={s.key} style={{ 
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
                         background: isCurrent ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', 
                         borderLeft: isCurrent ? '3px solid var(--brand-color)' : 'none',
-                        padding: '6px 10px', borderRadius: '6px', fontSize: '11px' 
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '11px',
+                        opacity: canEdit ? 1 : 0.65
                       }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>
@@ -610,12 +675,22 @@ export default function App() {
                           {isDone ? (
                             <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
                           ) : isCurrent ? (
-                            <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>
-                              Завершить
+                            <button 
+                              className="btn-primary" 
+                              style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: canEdit ? 'var(--brand-color)' : '#aaa' }} 
+                              onClick={() => handleUpdateShopStage(s.key, 'DONE')} 
+                              disabled={loading || !canEdit}
+                            >
+                              {canEdit ? 'Завершить' : '🔒 Чужой цех'}
                             </button>
                           ) : (
-                            <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
-                              Начать
+                            <button 
+                              className="btn-secondary" 
+                              style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} 
+                              onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} 
+                              disabled={loading || !canEdit}
+                            >
+                              {canEdit ? 'Начать' : '🔒 Чужой цех'}
                             </button>
                           )}
                         </div>
@@ -635,8 +710,10 @@ export default function App() {
                     {DEFAULT_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
                       const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
+                      const canEdit = canPerformAction(s.key);
+
                       return (
-                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px', opacity: canEdit ? 1 : 0.65 }}>
                           <div>
                             <b>{s.label}</b>
                             <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
@@ -647,7 +724,14 @@ export default function App() {
                           {sig?.signed ? (
                             <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span>
                           ) : (
-                            <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key)} disabled={loading}>Подписать</button>
+                            <button 
+                              className="btn-primary" 
+                              style={{ width: 'auto', padding: '4px 8px', fontSize: '10px', background: canEdit ? 'var(--brand-color)' : '#aaa' }} 
+                              onClick={() => handleSignAct(s.key)} 
+                              disabled={loading || !canEdit}
+                            >
+                              {canEdit ? 'Подписать' : '🔒 Чужой цех'}
+                            </button>
                           )}
                         </div>
                       );
@@ -675,8 +759,8 @@ export default function App() {
                     <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option></select>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned}>⏳ В очередь</button>
-                    <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned}>➡️ Завезти на путь</button>
+                    <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || activeRole !== 'ADMIN'}>⏳ В очередь</button>
+                    <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || activeRole !== 'ADMIN'}>➡️ Завезти на путь</button>
                   </div>
                 </div>
               </>
@@ -715,13 +799,10 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Документы и Ответственный за акты (Оформитель) */}
+                {/* Документы */}
                 <div className="premium-card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                     <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4>
-                    <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                      Оформитель: <b>{docsClerk.master}</b> (<a href={`https://t.me/${docsClerk.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)' }}>{docsClerk.tg}</a>)
-                    </span>
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
