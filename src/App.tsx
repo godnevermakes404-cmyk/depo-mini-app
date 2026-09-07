@@ -7,7 +7,7 @@ import {
   type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
 import { 
-  notifyWagonArrived, notifyActSigned, notifyPositionAssigned, 
+  notifyWagonArrived, notifyWagonsArrivedBulk, notifyActSigned, notifyPositionAssigned, 
   notifyShopStageUpdated, notifyDelayRegistered, notifyStatusChanged 
 } from './telegramNotifier';
 import './App.css';
@@ -95,7 +95,9 @@ const TRACKS_CONFIG = [
 ];
 
 const ROLES_LIST = [
-  { key: 'ADMIN', label: '👑 Начальник депо / Диспетчер (Полный доступ)' },
+  { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
+  { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
+  { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
@@ -142,7 +144,7 @@ export default function App() {
   const [actionDeadline, setActionDeadline] = useState('');
 
   // Формы регистрации
-  const [wagonNumber, setWagonNumber] = useState('');
+  const [wagonNumbersInput, setWagonNumbersInput] = useState('');
   const [wagonType, setWagonType] = useState('Полувагон');
   const [repairType, setRepairType] = useState('ДР');
   const [owner, setOwner] = useState('ПРОМТРАНС');
@@ -162,18 +164,12 @@ export default function App() {
     try {
       const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
-        tg.ready(); 
-        tg.expand(); 
-        tg.setHeaderColor?.('bg_color');
+        tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color');
         tgUser = tg.initDataUnsafe?.user;
       }
     } catch (e) {}
 
-    // 🔒 ИСПРАВЛЕНО: Никаких админов по умолчанию! Нет Telegram = нет входа.
-    if (!tgUser?.id) {
-      setIsOutsideTelegram(true);
-      return; // Останавливаем выполнение
-    }
+    if (!tgUser?.id) { setIsOutsideTelegram(true); return; }
 
     const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
     
@@ -181,13 +177,10 @@ export default function App() {
       setUser(dbUser);
       setActiveRole(dbUser.role || 'GUEST');
     } else {
-      const { data: newUser } = await supabase.from('users')
-        .insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }])
-        .select().single();
+      const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }]).select().single();
       setUser(newUser);
       setActiveRole('GUEST');
     }
-    
     loadData();
   }
 
@@ -207,11 +200,8 @@ export default function App() {
       const mapped: Record<string, ShopMasterConfig> = {};
       mastersData.forEach((m: any) => {
         mapped[m.shop_key] = { 
-          label: m.shop_name, 
-          master: m.master_name,
-          tg: m.telegram_handle || '@master',
-          role: m.role_code || 'MASTER',
-          targetHours: Number(m.target_hours || 4)
+          label: m.shop_name, master: m.master_name, tg: m.telegram_handle || '@master',
+          role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4)
         };
       });
       setShopMasters(mapped);
@@ -225,16 +215,9 @@ export default function App() {
     }
   }
 
-  async function handleRoleChange(newRole: string) {
-    // 🔒 ИСПРАВЛЕНО: Смена роли теперь исключительно локальная (Impersonation).
-    // Позволяет админу видеть интерфейс глазами разных мастеров, но не меняет реальную роль в БД.
-    setActiveRole(newRole);
-    vibrate('medium');
-  }
-
+  async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
 
-  // --- УТИЛИТЫ ---
   const getMasterLabel = (shopKey: string) => {
     const info = shopMasters[shopKey];
     return info ? `${info.master} (${info.tg})`.trim() : 'Мастер';
@@ -244,7 +227,6 @@ export default function App() {
     if (str == null) return '""';
     return `"${String(str).replace(/"/g, '""')}"`;
   };
-  // ---------------
 
   async function handleSaveMasters() {
     setLoading(true); vibrate('heavy');
@@ -254,9 +236,7 @@ export default function App() {
         role_code: val.role, target_hours: val.targetHours, updated_at: new Date().toISOString()
       });
     }
-    alert('Персонал, нормативы и Telegram-аккаунты сохранены!');
-    setLoading(false);
-    loadData();
+    alert('Персонал сохранен!'); setLoading(false); loadData();
   }
 
   async function openCaseDetails(item: RepairCase) {
@@ -274,35 +254,42 @@ export default function App() {
         paused_hours: Number(paused.toFixed(1)),
         net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
       } as RepairTimeMetrics);
-    } else {
-      setSelectedMetrics(null);
-    }
+    } else { setSelectedMetrics(null); }
 
     const { data: events } = await supabase.from('status_events').select('*, users(name, role)').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
-
     const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
     setDocuments(docs || []);
   }
 
   async function handleCreateRepair() {
-    if (!wagonNumber.trim() || wagonNumber.length !== 8) { alert('Введите 8-значный номер вагона'); return; }
+    const numbers = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8);
+    if (numbers.length === 0) { alert('Введите корректные 8-значные номера вагонов!'); return; }
+
     setLoading(true); vibrate('medium');
+    let successCount = 0;
+    const addedWagons: string[] = [];
+
+    for (const num of numbers) {
+      const { error } = await supabase.rpc('create_repair_case', {
+        p_wagon_number: num, p_repair_type: repairType, p_user_id: user?.id,
+        p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType
+      });
+      if (!error) { successCount++; addedWagons.push(num); }
+    }
     
-    const { error } = await supabase.rpc('create_repair_case', {
-      p_wagon_number: wagonNumber, p_repair_type: repairType, p_user_id: user?.id,
-      p_wagon_type: wagonType, p_owner: owner, p_owner_type: ownerType
-    });
-    
-    if (!error) { 
-      notifyWagonArrived(wagonNumber, repairType, owner, wagonType);
-      setWagonNumber(''); setShowAddModal(false); loadData(); 
-    } else { alert('Ошибка: ' + error.message); }
+    if (successCount > 0) { 
+      if (addedWagons.length === 1) { notifyWagonArrived(addedWagons[0], repairType, owner, wagonType); } 
+      else { notifyWagonsArrivedBulk(addedWagons, repairType, owner, wagonType); }
+      
+      alert(`Успешно принято вагонов на территорию: ${successCount} шт.`);
+      setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
+    } else { alert('Ошибка добавления. Проверьте ваши права (Охрана, Оператор или Админ).'); }
     setLoading(false);
   }
 
   async function handleSignAct(shopKey: string) {
-    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка доступа: Подписать акт может только ${shopMasters[shopKey]?.label || 'мастер'} или Админ.`); return; }
+    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка: Подписать может только ${shopMasters[shopKey]?.label} или Админ.`); return; }
     if (!selectedCase) return;
     setLoading(true);
     
@@ -318,7 +305,7 @@ export default function App() {
   }
 
   async function handleUpdateShopStage(shopKey: string, status: string) {
-    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка доступа: Работы в цехе может отмечать только ${shopMasters[shopKey]?.label} или Админ.`); return; }
+    if (!canPerformAction(shopKey)) { alert(`⛔ Ошибка: Отмечать этапы может только ${shopMasters[shopKey]?.label} или Админ.`); return; }
     if (!selectedCase) return;
     setLoading(true);
 
@@ -331,12 +318,15 @@ export default function App() {
       notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel);
       setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
       loadData();
-    } else { alert('Ошибка обновления этапа: ' + error.message); }
+    } else { alert('Ошибка этапа: ' + error.message); }
     setLoading(false);
   }
 
   async function handleAssignPosition(toRepair: boolean) {
-    if (activeRole !== 'ADMIN') { alert('⛔ Завезти вагон на путь или отправить в очередь может только Диспетчер / Админ.'); return; }
+    if (activeRole !== 'ADMIN' && activeRole !== 'operator') { 
+      alert('⛔ Только Оператор / Диспетчер может размещать вагоны.'); 
+      return; 
+    }
     if (!selectedCase) return;
     setLoading(true);
     
@@ -347,13 +337,13 @@ export default function App() {
     if (!error) { 
       notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position);
       setSelectedCase(null); loadData(); 
-    } else { alert('Ошибка назначения позиции: ' + error.message); }
+    } else { alert('Ошибка назначения: ' + error.message); }
     setLoading(false);
   }
 
   async function handleAddDocument() {
-    if (activeRole !== 'ADMIN' && activeRole !== 'docs') { alert('⛔ Подгружать документы может только Оформитель актов или Админ.'); return; }
-    if (!docNumber.trim() || !selectedCase) { alert('Введите номер документа!'); return; }
+    if (activeRole !== 'ADMIN' && activeRole !== 'docs') { alert('⛔ Только Оформитель или Админ.'); return; }
+    if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
     
     const { error } = await supabase.from('documents').insert([{
@@ -385,7 +375,7 @@ export default function App() {
   }
 
   async function handleConfirmDelay() {
-    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните причину, ответственного и следующее действие!'); return; }
+    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля задержки!'); return; }
     setLoading(true); vibrate('heavy');
     
     const { error } = await supabase.rpc('register_delay', {
@@ -397,17 +387,15 @@ export default function App() {
     if (!error) {
       notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction);
       setShowDelayModal(false); setSelectedCase(null); setDelayCause(''); setNextAction(''); setResponsibleParty(''); setActionDeadline(''); loadData();
-    } else { alert('Ошибка добавления задержки: ' + error.message); }
+    } else { alert('Ошибка задержки: ' + error.message); }
     setLoading(false);
   }
 
   function exportToCSV() {
     const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'SLA Deadline', 'Forecast Release'];
     const rows = filteredRepairs.map(r => [
-      escapeCsvCell(r.wagons?.wagon_number), 
-      escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), 
-      escapeCsvCell(r.repair_type), 
-      escapeCsvCell(r.wagons?.owner),
+      escapeCsvCell(r.wagons?.wagon_number), escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), 
+      escapeCsvCell(r.repair_type), escapeCsvCell(r.wagons?.owner),
       escapeCsvCell(r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''), 
       escapeCsvCell(r.forecast_release ? new Date(r.forecast_release).toLocaleString() : '')
     ]);
@@ -444,14 +432,10 @@ export default function App() {
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
-  // 🔒 БЛОКИРОВКА ЭКРАНА ЕСЛИ ВХОД НЕ ЧЕРЕЗ TELEGRAM
   if (isOutsideTelegram) {
     return (
       <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', textAlign: 'center', padding: '20px' }}>
-        <div>
-          <h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2>
-          <p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p>
-        </div>
+        <div><h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div>
       </div>
     );
   }
@@ -470,7 +454,7 @@ export default function App() {
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                  {forecastBreaches.length > 0 && <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг. (Прогноз &gt; SLA)</div>}
+                  {forecastBreaches.length > 0 && <div><b>⚠️ Риск срыва SLA:</b> {forecastBreaches.length} ваг.</div>}
                   {readyNotDispatched.length > 0 && <div><b>🚂 Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
                   {dqViolations.map((v, i) => <div key={i}><b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
                 </div>
@@ -520,11 +504,6 @@ export default function App() {
                 ))}
               </div>
             </div>
-
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 4px 0', fontSize: '13px' }}>Потери: <b>{lostWagonDays.totalDays} wagon-days</b></h4>
-              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Рассчитано только по PRIMARY задержкам</span>
-            </div>
           </>
         )}
 
@@ -562,7 +541,11 @@ export default function App() {
                 </div>
               );
             })}
-            <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
+            
+            {/* Кнопка регистрации доступна Охране, Оператору и Админу */}
+            {(activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
+              <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
+            )}
           </>
         )}
 
@@ -571,39 +554,27 @@ export default function App() {
             <div className="premium-card">
               <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта (Dwell Time)</h3>
               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
-                  <span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | P90: <b>{drCycle.p90} дн</b></span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
-                  <span><b>Капитальный ремонт (КР):</b></span><span>Медиана: <b>{krCycle.median} дн</b> | P90: <b>{krCycle.p90} дн</b></span>
-                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | P90: <b>{drCycle.p90} дн</b></span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Капитальный ремонт (КР):</b></span><span>Медиана: <b>{krCycle.median} дн</b> | P90: <b>{krCycle.p90} дн</b></span></div>
               </div>
             </div>
             <div className="premium-card">
               <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Pareto)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
                 <div key={cat} style={{ marginBottom: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}>
-                    <span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span>
-                  </div>
-                  <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}>
-                    <div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} />
-                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div>
+                  <div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div>
                 </div>
               ))}
             </div>
           </>
         )}
 
-        {/* ПРОФИЛЬ */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />
-                {user?.role === 'ADMIN' && <span style={{color: 'var(--brand-color)'}}>Симуляция: {currentRoleInfo?.label}</span>}
-              </p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />{user?.role === 'ADMIN' && <span style={{color: 'var(--brand-color)'}}>Симуляция: {currentRoleInfo?.label}</span>}</p>
             </div>
 
             {user?.role === 'ADMIN' ? (
@@ -637,7 +608,7 @@ export default function App() {
               </>
             ) : (
               <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>
-                🔒 Управление персоналом доступно только Начальнику депо.
+                🔒 Панель управления доступна только Начальнику депо.
               </div>
             )}
           </div>
@@ -651,19 +622,26 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: Регистрация вагона */}
+      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (ОХРАНА / КПП / ОПЕРАТОР) */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Регистрация вагона</h3>
-            <input className="input-field" type="number" value={wagonNumber} onChange={e => setWagonNumber(e.target.value)} placeholder="Номер вагона (8 цифр)" />
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
+            <textarea 
+              className="textarea-field" 
+              value={wagonNumbersInput} 
+              onChange={e => setWagonNumbersInput(e.target.value)} 
+              placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)"
+              rows={3}
+            />
             <select className="select-field" value={wagonType} onChange={e => setWagonType(e.target.value)}><option>Полувагон</option><option>Цистерна</option><option>Платформа</option><option>Крытый</option><option>Переоборудованный</option></select>
             <select className="select-field" value={repairType} onChange={e => setRepairType(e.target.value)}><option>КР</option><option>ДР</option><option>ТР</option><option>КРП</option><option>ДРП</option></select>
             <input className="input-field" type="text" value={owner} onChange={e => setOwner(e.target.value)} placeholder="Собственник" />
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}><option value="Own">Собственный</option><option value="Third-party">Сторонний</option></select>
+            
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Создать</button>
+              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading}>Зарегистрировать</button>
             </div>
           </div>
         </div>
@@ -765,8 +743,8 @@ export default function App() {
                     <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
                   </div>
                   <div style={{ display: 'flex', gap: '6px' }}>
-                    <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || activeRole !== 'ADMIN'}>⏳ В очередь</button>
-                    <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || activeRole !== 'ADMIN'}>➡️ Завезти на путь</button>
+                    <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || (activeRole !== 'ADMIN' && activeRole !== 'operator')}>⏳ В очередь</button>
+                    <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || (activeRole !== 'ADMIN' && activeRole !== 'operator')}>➡️ Завезти на путь</button>
                   </div>
                 </div>
               </>
