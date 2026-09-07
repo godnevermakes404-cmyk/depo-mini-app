@@ -14,7 +14,6 @@ import './App.css';
 
 declare global { interface Window { Telegram: any; } }
 
-// --- ТИПИЗАЦИЯ ---
 type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
 
 export const CASE_STATUS = {
@@ -255,7 +254,7 @@ export default function App() {
       setDelayCategory('Materials');
       const supplyInfo = shopMasters.procurement;
       setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения');
-      setDelayCause(''); setNextAction(''); setShowDelayModal(true); return; 
+      setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
     const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
@@ -268,7 +267,10 @@ export default function App() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
     setLoading(true); vibrate('heavy');
     const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id });
-    if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); loadData(); }
+    if (!error) { 
+      notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); 
+      setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); 
+    }
     setLoading(false);
   }
 
@@ -293,10 +295,8 @@ export default function App() {
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
-  // РОЛЕВЫЕ ФЛАГИ ДЛЯ UI
   const isAdminOrOperator = activeRole === 'ADMIN' || activeRole === 'operator';
   const isAdminOrDocs = activeRole === 'ADMIN' || activeRole === 'docs';
-  // Мастера видят только кнопку "Задержать", админы/операторы видят все статусы
   const visibleTransitions = isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
@@ -542,7 +542,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ШАГ 2 СКРЫТ ОТ МАСТЕРОВ, ОНИ ВИДЯТ ТОЛЬКО ТЕКСТ. ОПЕРАТОРЫ ВИДЯТ КНОПКИ */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
                   {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
@@ -575,7 +574,6 @@ export default function App() {
                   </div>
                 )}
                 
-                {/* СТАТУСЫ: МАСТЕРА ВИДЯТ ТОЛЬКО КНОПКУ "ЗАДЕРЖАТЬ" */}
                 {visibleTransitions.length > 0 && (
                   <div className="premium-card">
                     <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия:</h4>
@@ -636,6 +634,10 @@ export default function App() {
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
+            
+            {/* ПОЛЕ ДАТЫ ДЕДЛАЙНА */}
+            <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
+
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
           </div>
         </div>
