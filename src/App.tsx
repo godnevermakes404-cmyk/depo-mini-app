@@ -22,10 +22,10 @@ const DOCUMENT_TYPES = [
 ];
 
 const SHOPS = [
-  { key: 'bogie', label: 'Тележечный цех' },
-  { key: 'wheels', label: 'Колёсный цех' },
-  { key: 'brakes', label: 'Автотормозной цех' },
-  { key: 'body', label: 'Кузовной / Сварочный' }
+  { key: 'bogie', label: 'Тележечный цех', defaultMaster: 'Иванов И.И.' },
+  { key: 'wheels', label: 'Колёсный цех', defaultMaster: 'Петров П.П.' },
+  { key: 'brakes', label: 'Автотормозной цех', defaultMaster: 'Сидоров С.С.' },
+  { key: 'body', label: 'Кузовной / Сварочный', defaultMaster: 'Кузнецов К.К.' }
 ];
 
 export default function App() {
@@ -99,7 +99,7 @@ export default function App() {
   async function loadData() {
     const { data: repairData } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
-        track_number, position_number, shop_signatures,
+        track_number, position_number, shop_signatures, shop_progress, current_shop,
         contracts ( customer_name, sla_hours ),
         wagons ( wagon_number, owner, owner_type )
       `).order('created_at', { ascending: false });
@@ -175,6 +175,23 @@ export default function App() {
     });
     if (!error) {
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs });
+      loadData();
+    }
+    setLoading(false);
+  }
+
+  async function handleUpdateShopStage(shopKey: string, status: string, masterName: string) {
+    if (!selectedCase) return;
+    setLoading(true);
+    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', {
+      p_repair_id: selectedCase.repair_id,
+      p_shop_key: shopKey,
+      p_status: status,
+      p_master_name: masterName
+    });
+
+    if (!error) {
+      setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey });
       loadData();
     }
     setLoading(false);
@@ -262,6 +279,13 @@ export default function App() {
 
   const isInitialPhase = selectedCase && ['01 PLANNED', '04 QUEUE'].includes(selectedCase.current_status);
   const allSigned = selectedCase?.shop_signatures && SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+
+  // Расчёт времени на текущем цеховом этапе
+  const getShopDuration = (startAt: string | null) => {
+    if (!startAt) return '0 ч';
+    const hours = Math.max(0, (new Date().getTime() - new Date(startAt).getTime()) / (1000 * 60 * 60));
+    return hours < 1 ? `${Math.round(hours * 60)} мин` : `${hours.toFixed(1)} ч`;
+  };
 
   return (
     <div>
@@ -446,9 +470,81 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
+            {/* Блок выбора вида ремонта */}
+            <div className="premium-card">
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Вид ремонта:</span>
+                <select 
+                  className="select-field" 
+                  style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                  value={selectedCase.repair_type || 'ДР'} 
+                  onChange={async (e) => {
+                    const newType = e.target.value;
+                    setSelectedCase({ ...selectedCase, repair_type: newType });
+                    await supabase.from('repair_cases').update({ repair_type: newType }).eq('repair_id', selectedCase.repair_id);
+                    loadData();
+                  }}
+                >
+                  <option value="КР">КР (Капитальный)</option>
+                  <option value="ДР">ДР (Деповской)</option>
+                  <option value="ТР">ТР (Текущий)</option>
+                  <option value="КРП">КРП (С продлением)</option>
+                  <option value="ДРП">ДРП (Деповской с продлением)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* БЛОК ЦЕХОВ И ОТВЕТСТВЕННЫХ (Для режима "В ремонте") */}
+            {!isInitialPhase && (
+              <div className="premium-card">
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>
+                  🏗️ Этапы ремонта и Ответственные цехов
+                </h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {SHOPS.map(s => {
+                    const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING', master: s.defaultMaster };
+                    const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
+                    const isDone = prog.status === 'DONE';
+
+                    return (
+                      <div key={s.key} style={{ 
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+                        background: isCurrent ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', 
+                        borderLeft: isCurrent ? '3px solid var(--brand-color)' : 'none',
+                        padding: '6px 10px', borderRadius: '6px', fontSize: '11px' 
+                      }}>
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>
+                            {s.label} {isCurrent && <span style={{ color: 'var(--brand-color)', fontSize: '10px' }}>(В работе: {getShopDuration(prog.start_at)})</span>}
+                          </div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            Мастер: <b>{prog.master || s.defaultMaster}</b>
+                          </div>
+                        </div>
+
+                        <div>
+                          {isDone ? (
+                            <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                          ) : isCurrent ? (
+                            <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE', prog.master || s.defaultMaster)} disabled={loading}>
+                              Завершить
+                            </button>
+                          ) : (
+                            <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS', prog.master || s.defaultMaster)} disabled={loading}>
+                              Начать
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {isInitialPhase ? (
               <>
-                {/* ШАГ 1: Комиссионный Акт ВУ-22 с выводом ФИО и даты/времени подписи */}
+                {/* ШАГ 1: Комиссионный Акт ВУ-22 */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -475,11 +571,10 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ШАГ 2: Диспетчеризация и статус размещения вагона */}
+                {/* ШАГ 2: Диспетчеризация */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
                   
-                  {/* Информация о текущем местоположении */}
                   {selectedCase.track_number ? (
                     <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>
                       📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b>
