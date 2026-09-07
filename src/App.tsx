@@ -49,8 +49,8 @@ interface RepairCase {
   shop_signatures: Record<string, any>;
   shop_progress: Record<string, any>;
   current_shop: string | null;
-  contracts: Contract;
-  wagons: Wagon;
+  contracts: Contract | any;
+  wagons: Wagon | any;
 }
 
 interface DelayLog {
@@ -211,7 +211,7 @@ export default function App() {
 
     if (metrics) setTimeMetricsList(metrics);
     if (repairData) {
-      setRepairs(repairData as RepairCase[]);
+      setRepairs(repairData as unknown as RepairCase[]);
       setDelayLogs(delays as DelayLog[] || []);
       setDqViolations(runDataQualityChecks(repairData, delays || []));
     }
@@ -417,8 +417,8 @@ export default function App() {
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
   
-  const drHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === m.repair_id)?.repair_type === 'ДР').map(m => Number(m.total_dwell_hours || 0));
-  const krHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === m.repair_id)?.repair_type === 'КР').map(m => Number(m.total_dwell_hours || 0));
+  const drHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'ДР').map(m => Number(m.total_dwell_hours || 0));
+  const krHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'КР').map(m => Number(m.total_dwell_hours || 0));
   const drCycle = calculateCyclePercentiles(drHours);
   const krCycle = calculateCyclePercentiles(krHours);
 
@@ -581,7 +581,9 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Системная роль: <b>{user?.role || 'GUEST'}</b></p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                Системная роль: <b>{user?.role || 'GUEST'}</b> ({currentRoleInfo?.label})
+              </p>
             </div>
 
             {user?.role === 'ADMIN' ? (
