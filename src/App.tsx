@@ -239,12 +239,26 @@ export default function App() {
     setLoading(false);
   }
 
+  // 🔒 ИСПОЛЬЗУЕМ БЕЗОПАСНЫЙ RPC ВМЕСТО ПРЯМОГО INSERT
   async function handleAddDocument() {
     if (activeRole !== 'ADMIN' && activeRole !== 'docs') return;
     if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
-    const { error } = await supabase.from('documents').insert([{ repair_id: selectedCase.repair_id, doc_type: docType, doc_number: docNumber, doc_date: new Date().toISOString().split('T')[0] }]);
-    if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); }
+    
+    const { error } = await supabase.rpc('add_document', {
+      p_repair_id: selectedCase.repair_id,
+      p_doc_type: docType,
+      p_doc_number: docNumber,
+      p_user_id: user?.id
+    });
+    
+    if (!error) {
+      setDocNumber('');
+      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
+      setDocuments(docs || []);
+    } else {
+      alert('Ошибка добавления документа: ' + error.message);
+    }
     setLoading(false);
   }
 
@@ -634,8 +648,6 @@ export default function App() {
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Next Action" />
-            
-            {/* ПОЛЕ ДАТЫ ДЕДЛАЙНА */}
             <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
