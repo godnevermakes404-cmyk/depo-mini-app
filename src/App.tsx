@@ -284,7 +284,7 @@ export default function App() {
       
       alert(`Успешно принято вагонов на территорию: ${successCount} шт.`);
       setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
-    } else { alert('Ошибка добавления. Проверьте ваши права (Охрана, Оператор или Админ).'); }
+    } else { alert('Ошибка добавления. Проверьте ваши права (Только Охрана или Админ).'); }
     setLoading(false);
   }
 
@@ -542,8 +542,8 @@ export default function App() {
               );
             })}
             
-            {/* Кнопка регистрации доступна Охране, Оператору и Админу */}
-            {(activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
+            {/* Кнопка регистрации доступна ТОЛЬКО Охране и Админу */}
+            {(activeRole === 'ADMIN' || activeRole === 'security') && (
               <button className="fab" onClick={() => setShowAddModal(true)}>+</button>
             )}
           </>
@@ -622,7 +622,7 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (ОХРАНА / КПП / ОПЕРАТОР) */}
+      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ (ОХРАНА И АДМИН) */}
       {showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
