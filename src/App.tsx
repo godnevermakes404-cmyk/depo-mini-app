@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
-import { STATUS_RU, ON_SITE_STATUSES } from './depoEngine';
+import { STATUS_RU } from './depoEngine';
 import './App.css';
 
 declare global { interface Window { Telegram: any; } }
-
-type AppTab = 'wagons' | 'analytics' | 'profile';
 
 const SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
@@ -17,7 +15,6 @@ const SHOPS = [
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
-  const [currentTab, setCurrentTab] = useState<AppTab>('wagons');
   const [showAddModal, setShowAddModal] = useState(false);
 
   const [repairs, setRepairs] = useState<any[]>([]);
