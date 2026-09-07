@@ -170,11 +170,12 @@ export default function App() {
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
       if (dbUser) {
         setUser(dbUser);
-        setActiveRole(dbUser.role || 'ADMIN');
+        setActiveRole(dbUser.role || 'GUEST');
       } else {
-        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'ADMIN' }]).select().single();
+        // 🔒 ИСПРАВЛЕНО: Новые пользователи теперь по умолчанию получают роль GUEST
+        const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }]).select().single();
         setUser(newUser);
-        setActiveRole('ADMIN');
+        setActiveRole('GUEST');
       }
     } else {
       setUser({ id: '00000000-0000-0000-0000-000000000000', name: 'Владимир', role: 'ADMIN' });
@@ -218,12 +219,10 @@ export default function App() {
   }
 
   async function handleRoleChange(newRole: string) {
+    // 🔒 ИСПРАВЛЕНО: Смена роли теперь исключительно локальная (Impersonation).
+    // Позволяет админу видеть интерфейс глазами разных мастеров, но не меняет реальную роль в БД.
     setActiveRole(newRole);
     vibrate('medium');
-    if (user?.id) {
-      await supabase.from('users').update({ role: newRole }).eq('id', user.id);
-      setUser((prev) => prev ? { ...prev, role: newRole } : null);
-    }
   }
 
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
@@ -577,13 +576,12 @@ export default function App() {
           </>
         )}
 
+        {/* ПРОФИЛЬ */}
         {currentTab === 'profile' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                Системная роль: <b>{user?.role || 'GUEST'}</b> ({currentRoleInfo?.label})
-              </p>
+              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Системная роль: <b>{user?.role || 'GUEST'}</b></p>
             </div>
 
             {user?.role === 'ADMIN' ? (
