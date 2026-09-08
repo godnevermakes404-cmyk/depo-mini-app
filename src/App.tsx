@@ -508,10 +508,10 @@ export default function App() {
                 const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
                 const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
                 
-                // 🎯 РАСЧЕТ ДАТЫ ЗАХОДА И ДНЕЙ В ДЕПО
-                const createdDate = new Date(item.created_at);
+                // 🎯 ГАРАНТИРОВАННЫЙ РАСЧЕТ ДАТЫ И ДНЕЙ
+                const createdDate = item.created_at ? new Date(item.created_at) : new Date();
                 const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                const daysOnSite = Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+                const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
 
                 return (
                   <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
@@ -527,9 +527,9 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* 🎯 СТРОКА С ДАТОЙ ЗАХОДА И ВРЕМЕНЕМ НАХОЖДЕНИЯ В ДЕПО */}
-                    <div style={{ fontSize: '10px', color: 'var(--brand-color)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
-                      📅 Зашёл в депо: {formattedDate} ({daysOnSite} дн.)
+                    {/* 🎯 ЗАМЕТНАЯ СТРОКА ДАТЫ ЗАХОДА В ДЕПО */}
+                    <div style={{ fontSize: '11px', color: 'var(--brand-color)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      📅 Заход: {formattedDate} ({daysOnSite} дн.)
                     </div>
 
                     {activeDelay && (
