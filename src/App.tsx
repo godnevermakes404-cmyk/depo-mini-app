@@ -296,13 +296,19 @@ export default function App() {
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
   
+  // 🎯 КОРРЕКТНЫЙ РАСЧЕТ ТАЙМЕРА (Для готовых вагонов таймер фиксируется)
+  const getWagonDwellHours = (r: RepairCase) => {
+    const start = new Date(r.created_at).getTime();
+    // Если вагон уже готов, берем фиксированное время (или момент планируемого/прогнозируемого завершения), а не тикающие часы до сегодняшней секунды
+    const end = r.current_status === CASE_STATUS.READY && r.forecast_release 
+      ? new Date(r.forecast_release).getTime() 
+      : new Date().getTime();
+    return Math.max(0, (end - start) / (1000 * 60 * 60));
+  };
+
   const getRepairTypeStats = (typeCode: string) => {
     const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
-    const hoursList = matchingRepairs.map(r => {
-      const start = new Date(r.created_at).getTime();
-      const end = new Date().getTime();
-      return Math.max(0, (end - start) / (1000 * 60 * 60));
-    });
+    const hoursList = matchingRepairs.map(getWagonDwellHours);
     
     if (hoursList.length === 0) return { count: 0, medianHours: 0, medianDays: 0, p90Hours: 0, p90Days: 0 };
     
@@ -325,12 +331,11 @@ export default function App() {
   const krpStats = getRepairTypeStats('КРП');
   const trStats = getRepairTypeStats('ТР');
 
-  const totalDwellHours = repairs.reduce((acc, r) => {
-    const start = new Date(r.created_at).getTime();
-    return acc + Math.max(0, (new Date().getTime() - start) / (1000 * 60 * 60));
-  }, 0);
+  // Учитываем только не готовые вагоны в активном простое
+  const activeRepairs = repairs.filter(r => r.current_status !== CASE_STATUS.READY);
+  const totalDwellHours = activeRepairs.reduce((acc, r) => acc + getWagonDwellHours(r), 0);
   const totalDwellDays = (totalDwellHours / 24).toFixed(1);
-  const avgHoursPerWagon = repairs.length > 0 ? Math.round(totalDwellHours / repairs.length) : 0;
+  const avgHoursPerWagon = activeRepairs.length > 0 ? Math.round(totalDwellHours / activeRepairs.length) : 0;
   const avgDaysPerWagon = (avgHoursPerWagon / 24).toFixed(1);
 
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
@@ -429,15 +434,15 @@ export default function App() {
         {currentTab === 'analytics' && (
           <>
             <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>📊 Сводный простой всех вагонов</h3>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>📊 Сводный простой не завершенных вагонов</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
                 <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Общий налёт времени:</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Активный налёт времени:</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{Math.round(totalDwellHours).toLocaleString()} ч</div>
                   <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({totalDwellDays} вагон-дней)</div>
                 </div>
                 <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Средний простой 1 вагона:</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Средний простой (активных):</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{avgHoursPerWagon} ч</div>
                   <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({avgDaysPerWagon} дн/вагон)</div>
                 </div>
