@@ -296,10 +296,8 @@ export default function App() {
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
   
-  // 🎯 КОРРЕКТНЫЙ РАСЧЕТ ТАЙМЕРА (Для готовых вагонов таймер фиксируется)
   const getWagonDwellHours = (r: RepairCase) => {
     const start = new Date(r.created_at).getTime();
-    // Если вагон уже готов, берем фиксированное время (или момент планируемого/прогнозируемого завершения), а не тикающие часы до сегодняшней секунды
     const end = r.current_status === CASE_STATUS.READY && r.forecast_release 
       ? new Date(r.forecast_release).getTime() 
       : new Date().getTime();
@@ -331,7 +329,6 @@ export default function App() {
   const krpStats = getRepairTypeStats('КРП');
   const trStats = getRepairTypeStats('ТР');
 
-  // Учитываем только не готовые вагоны в активном простое
   const activeRepairs = repairs.filter(r => r.current_status !== CASE_STATUS.READY);
   const totalDwellHours = activeRepairs.reduce((acc, r) => acc + getWagonDwellHours(r), 0);
   const totalDwellDays = (totalDwellHours / 24).toFixed(1);
@@ -620,23 +617,29 @@ export default function App() {
                   {DEFAULT_SHOPS.map(s => {
                     const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
                     const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master', targetHours: 4 };
-                    const isCurrent = selectedCase.current_shop === s.key || prog.status === 'IN_PROGRESS';
+                    const isInProgress = prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
                     const canEdit = canPerformAction(s.key);
                     const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
 
                     return (
-                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isCurrent ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', borderLeft: isCurrent ? '3px solid var(--brand-color)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', borderLeft: isInProgress ? '3px solid var(--brand-color)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>{s.label}
-                            <span style={{ color: timeInfo.isOverdue ? 'var(--danger)' : isCurrent ? 'var(--brand-color)' : 'var(--text-muted)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
-                              ({isCurrent ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
+                            <span style={{ color: timeInfo.isOverdue ? 'var(--danger)' : isInProgress ? 'var(--brand-color)' : 'var(--text-muted)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
+                              ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
                             </span>
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
                         </div>
                         <div>
-                          {isDone ? <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span> : isCurrent ? (canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand-color)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>) : (canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>⏳ Ожидает</span>)}
+                          {isDone ? (
+                            <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                          ) : isInProgress ? (
+                            canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand-color)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
+                          ) : (
+                            canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>⏳ Ожидает</span>
+                          )}
                         </div>
                       </div>
                     );
