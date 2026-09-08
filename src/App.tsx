@@ -3,7 +3,7 @@ import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import { 
   STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
-  runDataQualityChecks, calculateLostWagonDays, calculateCyclePercentiles,
+  runDataQualityChecks, calculateLostWagonDays,
   type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
 import { 
@@ -81,7 +81,6 @@ export default function App() {
 
   const [repairs, setRepairs] = useState<RepairCase[]>([]);
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
-  const [timeMetricsList, setTimeMetricsList] = useState<RepairTimeMetrics[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
@@ -151,7 +150,6 @@ export default function App() {
       `).order('created_at', { ascending: false });
 
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
-    const { data: metrics } = await supabase.from('v_repair_time_metrics').select('*');
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
     
     if (mastersData && mastersData.length > 0) {
@@ -160,7 +158,6 @@ export default function App() {
       setShopMasters(prev => ({ ...prev, ...mapped }));
     }
 
-    if (metrics) setTimeMetricsList(metrics);
     if (repairData) {
       setRepairs(repairData as unknown as RepairCase[]);
       setDelayLogs(delays as DelayLog[] || []);
@@ -299,12 +296,11 @@ export default function App() {
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
   
-  // 🎯 РАСЧЕТ РАСШИРЕННОЙ АНАЛИТИКИ В ЧАСАХ И ДНЯХ
   const getRepairTypeStats = (typeCode: string) => {
     const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
     const hoursList = matchingRepairs.map(r => {
       const start = new Date(r.created_at).getTime();
-      const end = r.current_status === CASE_STATUS.READY ? new Date().getTime() : new Date().getTime();
+      const end = new Date().getTime();
       return Math.max(0, (end - start) / (1000 * 60 * 60));
     });
     
@@ -329,7 +325,6 @@ export default function App() {
   const krpStats = getRepairTypeStats('КРП');
   const trStats = getRepairTypeStats('ТР');
 
-  // Расчет общего простоя всех вагонов в депо
   const totalDwellHours = repairs.reduce((acc, r) => {
     const start = new Date(r.created_at).getTime();
     return acc + Math.max(0, (new Date().getTime() - start) / (1000 * 60 * 60));
@@ -431,10 +426,8 @@ export default function App() {
           </>
         )}
 
-        {/* 🎯 РАСШИРЕННАЯ АНАЛИТИКА В ЧАСАХ И ДНЯХ */}
         {currentTab === 'analytics' && (
           <>
-            {/* БЛОК 1: ОБЩИЙ НАЛЁТ ЧАСОВ */}
             <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
               <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>📊 Сводный простой всех вагонов</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
@@ -451,7 +444,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК 2: ЦИКЛ РЕМОНТА ПО ТИПАМ В ЧАСАХ И ДНЯХ */}
             <div className="premium-card">
               <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>⏱️ Время цикла по видам ремонта</h3>
               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
@@ -487,7 +479,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК 3: ПАРЕТО С ПЕРЕВОДОМ НА РУССКИЙ И ЧАСАМИ */}
             <div className="premium-card">
               <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--danger)' }}>🚨 Структура потерь и задержек (Парето)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => {
