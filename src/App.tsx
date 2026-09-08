@@ -31,7 +31,7 @@ const CATEGORY_RU: Record<string, string> = {
   'Railway': '🚂 Железная дорога (ЖД)'
 };
 
-interface Wagon { wagon_number: string; owner: string; owner_type: string; }
+interface Wagon { id?: string; wagon_number: string; owner: string; owner_type: string; }
 interface Contract { customer_name: string; sla_hours: number; }
 interface RepairCase {
   repair_id: string; current_status: string; repair_type: string; created_at: string;
@@ -146,7 +146,7 @@ export default function App() {
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
         track_number, position_number, shop_signatures, shop_progress, current_shop,
         contracts ( customer_name, sla_hours ),
-        wagons ( wagon_number, owner, owner_type )
+        wagons ( id, wagon_number, owner, owner_type )
       `).order('created_at', { ascending: false });
 
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
@@ -207,7 +207,7 @@ export default function App() {
 
     const defaultWagonType = 'Полувагон';
     const defaultRepairType = 'ДР';
-    const defaultOwner = ownerType === 'Own' ? 'ПРОМТРАНС' : 'Сторонний';
+    const defaultOwner = ownerType === 'Own' ? 'Собственный' : 'Чужой';
 
     for (const num of numbers) {
       const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: defaultRepairType, p_user_id: user?.id, p_wagon_type: defaultWagonType, p_owner: defaultOwner, p_owner_type: ownerType });
@@ -419,7 +419,7 @@ export default function App() {
               return (
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
                   {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div></div>}
                 </div>
               );
@@ -589,23 +589,51 @@ export default function App() {
             </div>
 
             <div className="premium-card">
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <span style={{ fontSize: '11px', fontWeight: 'bold' }}>Вид ремонта:</span>
-                <select 
-                  className="select-field" 
-                  style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
-                  value={selectedCase.repair_type || 'ДР'} 
-                  disabled={!isAdminOrOperator || loading}
-                  onChange={async (e) => {
-                    const newType = e.target.value;
-                    setLoading(true);
-                    const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: user?.id });
-                    if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
-                    else { alert('Ошибка смены вида ремонта: ' + error.message); }
-                    setLoading(false);
-                  }}>
-                  <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
-                </select>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
+                  <select 
+                    className="select-field" 
+                    style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                    value={selectedCase.repair_type || 'ДР'} 
+                    disabled={!isAdminOrOperator || loading}
+                    onChange={async (e) => {
+                      const newType = e.target.value;
+                      setLoading(true);
+                      const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: user?.id });
+                      if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
+                      else { alert('Ошибка смены вида ремонта: ' + error.message); }
+                      setLoading(false);
+                    }}>
+                    <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
+                  </select>
+                </div>
+
+                {/* 🎯 РЕДАКТИРУЕМОЕ ПОЛЕ СОБСТВЕННИКА */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Собственник:</span>
+                  <input 
+                    className="input-field" 
+                    style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                    type="text" 
+                    value={selectedCase.wagons?.owner || ''} 
+                    disabled={!isAdminOrOperator || loading}
+                    placeholder="Укажите собственника"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedCase({ ...selectedCase, wagons: { ...selectedCase.wagons, owner: val } });
+                    }}
+                    onBlur={async (e) => {
+                      if (!selectedCase.wagons?.id) return;
+                      await supabase.rpc('update_wagon_owner', { 
+                        p_wagon_id: selectedCase.wagons.id, 
+                        p_owner: e.target.value, 
+                        p_user_id: user?.id 
+                      });
+                      loadData();
+                    }}
+                  />
+                </div>
               </div>
             </div>
 
