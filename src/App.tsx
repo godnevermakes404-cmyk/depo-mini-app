@@ -78,7 +78,6 @@ export default function App() {
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
 
-  // 🎯 РАСШИРЕННЫЕ ФИЛЬТРЫ ВАГОНОВ
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
@@ -297,7 +296,6 @@ export default function App() {
 
   const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
   
-  // 🎯 ФИЛЬТРАЦИЯ СПИСКА ВАГОНОВ ПО ВСЕМ ПАРАМЕТРАМ
   const filteredRepairs = repairs.filter(r => {
     if (statusFilter && r.current_status !== statusFilter) return false;
     if (repairTypeFilter && r.repair_type !== repairTypeFilter) return false;
@@ -449,7 +447,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 🎯 МНОГОФУНКЦИОНАЛЬНАЯ ПАНЕЛЬ ФИЛЬТРОВ И ПОИСКА */}
             <div className="premium-card" style={{ padding: '8px 10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <input 
                 className="input-field" 
@@ -510,11 +507,36 @@ export default function App() {
               filteredRepairs.map((item) => {
                 const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
                 const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
+                
+                // 🎯 РАСЧЕТ ДАТЫ ЗАХОДА И ДНЕЙ В ДЕПО
+                const createdDate = new Date(item.created_at);
+                const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                const daysOnSite = Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+
                 return (
                   <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
-                    {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div></div>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
+                      <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
+                    </div>
+                    
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span>
+                      <span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>
+                        {isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
+                      </span>
+                    </div>
+
+                    {/* 🎯 СТРОКА С ДАТОЙ ЗАХОДА И ВРЕМЕНЕМ НАХОЖДЕНИЯ В ДЕПО */}
+                    <div style={{ fontSize: '10px', color: 'var(--brand-color)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 'bold' }}>
+                      📅 Зашёл в депо: {formattedDate} ({daysOnSite} дн.)
+                    </div>
+
+                    {activeDelay && (
+                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}>
+                        <div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -680,12 +702,19 @@ export default function App() {
           <div className="bottom-sheet">
             <div className="sheet-handle"></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-              <div><h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3><span className="status-pill" style={{ color: 'var(--brand-color)' }}>{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span></div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
+                <span className="status-pill" style={{ color: 'var(--brand-color)' }}>{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
+              </div>
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
             <div className="premium-card">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ fontSize: '11px', color: 'var(--brand-color)', fontWeight: 'bold' }}>
+                  📅 Дата захода в депо: {new Date(selectedCase.created_at).toLocaleString('ru-RU')}
+                </div>
+
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
                   <select 
