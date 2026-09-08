@@ -77,7 +77,12 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
+
+  // 🎯 РАСШИРЕННЫЕ ФИЛЬТРЫ ВАГОНОВ
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
+  const [delayCategoryFilter, setDelayCategoryFilter] = useState<string | null>(null);
 
   const [repairs, setRepairs] = useState<RepairCase[]>([]);
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
@@ -291,7 +296,28 @@ export default function App() {
   }
 
   const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
-  const filteredRepairs = statusFilter ? repairs.filter(r => r.current_status === statusFilter) : repairs;
+  
+  // 🎯 ФИЛЬТРАЦИЯ СПИСКА ВАГОНОВ ПО ВСЕМ ПАРАМЕТРАМ
+  const filteredRepairs = repairs.filter(r => {
+    if (statusFilter && r.current_status !== statusFilter) return false;
+    if (repairTypeFilter && r.repair_type !== repairTypeFilter) return false;
+    if (searchQuery.trim() && !r.wagons?.wagon_number?.includes(searchQuery.trim())) return false;
+    if (delayCategoryFilter) {
+      const activeDelay = delayLogs.find(d => d.repair_id === r.repair_id && !d.end_datetime);
+      if (!activeDelay || activeDelay.category !== delayCategoryFilter) return false;
+    }
+    return true;
+  });
+
+  const resetAllFilters = () => {
+    setStatusFilter(null);
+    setSearchQuery('');
+    setRepairTypeFilter(null);
+    setDelayCategoryFilter(null);
+  };
+
+  const isFilterActive = statusFilter || searchQuery || repairTypeFilter || delayCategoryFilter;
+
   const lostWagonDays = calculateLostWagonDays(delayLogs);
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
@@ -409,21 +435,91 @@ export default function App() {
 
         {currentTab === 'wagons' && (
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>{statusFilter ? `Фильтр: ${STATUS_RU[statusFilter]}` : 'Все вагоны'}</h3>
-              <div style={{ display: 'flex', gap: '6px' }}>{statusFilter && <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={() => setStatusFilter(null)}>Сброс</button>}<button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px' }}>
+                Вагоны ({filteredRepairs.length})
+              </h3>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {isFilterActive && (
+                  <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--danger)' }} onClick={resetAllFilters}>
+                    Сбросить фильтры
+                  </button>
+                )}
+                <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
+              </div>
             </div>
-            {filteredRepairs.map((item) => {
-              const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
-              const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
-              return (
-                <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
-                  {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div></div>}
-                </div>
-              );
-            })}
+
+            {/* 🎯 МНОГОФУНКЦИОНАЛЬНАЯ ПАНЕЛЬ ФИЛЬТРОВ И ПОИСКА */}
+            <div className="premium-card" style={{ padding: '8px 10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <input 
+                className="input-field" 
+                style={{ margin: 0, padding: '6px 10px', fontSize: '12px' }} 
+                type="text" 
+                placeholder="🔍 Поиск по номеру вагона..." 
+                value={searchQuery} 
+                onChange={e => setSearchQuery(e.target.value)} 
+              />
+
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto' }}>
+                <select 
+                  className="select-field" 
+                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1 }} 
+                  value={statusFilter || ''} 
+                  onChange={e => setStatusFilter(e.target.value || null)}
+                >
+                  <option value="">Все статусы</option>
+                  <option value={CASE_STATUS.QUEUE}>В очереди</option>
+                  <option value={CASE_STATUS.IN_REPAIR}>В ремонте</option>
+                  <option value={CASE_STATUS.PAUSED}>Задержано</option>
+                  <option value={CASE_STATUS.READY}>Готов к отправке</option>
+                </select>
+
+                <select 
+                  className="select-field" 
+                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1 }} 
+                  value={repairTypeFilter || ''} 
+                  onChange={e => setRepairTypeFilter(e.target.value || null)}
+                >
+                  <option value="">Все виды ремонта</option>
+                  <option value="ДР">Деповской (ДР)</option>
+                  <option value="КРП">Переоборудование (КРП)</option>
+                  <option value="ТР">Текущий (ТР)</option>
+                  <option value="КР">Капитальный (КР)</option>
+                </select>
+
+                <select 
+                  className="select-field" 
+                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1.2 }} 
+                  value={delayCategoryFilter || ''} 
+                  onChange={e => setDelayCategoryFilter(e.target.value || null)}
+                >
+                  <option value="">Все задержки</option>
+                  <option value="Materials">📦 Запчасти / Материалы</option>
+                  <option value="Equipment">🛠 Оборудование</option>
+                  <option value="Customer">👤 Заказчик</option>
+                  <option value="Railway">🚂 ЖД</option>
+                </select>
+              </div>
+            </div>
+
+            {filteredRepairs.length === 0 ? (
+              <div className="premium-card" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                🔍 Вагоны по выбранным фильтрам не найдены
+              </div>
+            ) : (
+              filteredRepairs.map((item) => {
+                const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
+                const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
+                return (
+                  <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
+                    {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div></div>}
+                  </div>
+                );
+              })
+            )}
+
             {(activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
           </>
         )}
@@ -609,7 +705,6 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* 🎯 РЕДАКТИРУЕМОЕ ПОЛЕ СОБСТВЕННИКА */}
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Собственник:</span>
                   <input 
