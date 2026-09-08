@@ -24,6 +24,13 @@ export const CASE_STATUS = {
   READY: '11 READY_TO_DISPATCH'
 } as const;
 
+const CATEGORY_RU: Record<string, string> = {
+  'Materials': '📦 Материалы / Запчасти',
+  'Equipment': '🛠 Поломка оборудования',
+  'Customer': '👤 Заказчик',
+  'Railway': '🚂 Железная дорога (ЖД)'
+};
+
 interface Wagon { wagon_number: string; owner: string; owner_type: string; }
 interface Contract { customer_name: string; sla_hours: number; }
 interface RepairCase {
@@ -40,8 +47,6 @@ interface DelayLog {
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
-
-// 🎯 ДОБАВЛЕН ХОЛОДИЛЬНЫЙ ЦЕХ
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
@@ -49,13 +54,10 @@ const DEFAULT_SHOPS = [
   { key: 'body', label: 'Кузовной / Сварочный' },
   { key: 'cooling', label: 'Холодильный цех' }
 ];
-
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
-
-// 🎯 ОБНОВЛЕНЫ РОЛИ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
@@ -82,7 +84,6 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<RepairTimeMetrics[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // 🎯 ОБНОВЛЕНЫ НАСТРОЙКИ ПО УМОЛЧАНИЮ ДЛЯ МАСТЕРОВ
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
     procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цеха (отвечает за ремонт и за остальные цеха)', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
@@ -297,9 +298,45 @@ export default function App() {
   const lostWagonDays = calculateLostWagonDays(delayLogs);
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
-  const drHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'ДР').map(m => Number(m.total_dwell_hours || 0));
-  const krHours = timeMetricsList.filter(m => repairs.find(r => r.repair_id === (m as any).repair_id)?.repair_type === 'КР').map(m => Number(m.total_dwell_hours || 0));
-  const drCycle = calculateCyclePercentiles(drHours); const krCycle = calculateCyclePercentiles(krHours);
+  
+  // 🎯 РАСЧЕТ РАСШИРЕННОЙ АНАЛИТИКИ В ЧАСАХ И ДНЯХ
+  const getRepairTypeStats = (typeCode: string) => {
+    const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
+    const hoursList = matchingRepairs.map(r => {
+      const start = new Date(r.created_at).getTime();
+      const end = r.current_status === CASE_STATUS.READY ? new Date().getTime() : new Date().getTime();
+      return Math.max(0, (end - start) / (1000 * 60 * 60));
+    });
+    
+    if (hoursList.length === 0) return { count: 0, medianHours: 0, medianDays: 0, p90Hours: 0, p90Days: 0 };
+    
+    const sorted = [...hoursList].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianH = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    const p90Idx = Math.floor(sorted.length * 0.9);
+    const p90H = sorted[p90Idx] || sorted[sorted.length - 1];
+
+    return {
+      count: matchingRepairs.length,
+      medianHours: Math.round(medianH),
+      medianDays: Number((medianH / 24).toFixed(1)),
+      p90Hours: Math.round(p90H),
+      p90Days: Number((p90H / 24).toFixed(1))
+    };
+  };
+
+  const drStats = getRepairTypeStats('ДР');
+  const krpStats = getRepairTypeStats('КРП');
+  const trStats = getRepairTypeStats('ТР');
+
+  // Расчет общего простоя всех вагонов в депо
+  const totalDwellHours = repairs.reduce((acc, r) => {
+    const start = new Date(r.created_at).getTime();
+    return acc + Math.max(0, (new Date().getTime() - start) / (1000 * 60 * 60));
+  }, 0);
+  const totalDwellDays = (totalDwellHours / 24).toFixed(1);
+  const avgHoursPerWagon = repairs.length > 0 ? Math.round(totalDwellHours / repairs.length) : 0;
+  const avgDaysPerWagon = (avgHoursPerWagon / 24).toFixed(1);
 
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
@@ -386,7 +423,7 @@ export default function App() {
                 <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span><span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span></div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}><span>{item.repair_type} • {item.wagons?.owner}</span><span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>{isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}</span></div>
-                  {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {activeDelay.category}:</b> {activeDelay.cause}</div></div>}
+                  {activeDelay && <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}><div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div></div>}
                 </div>
               );
             })}
@@ -394,20 +431,85 @@ export default function App() {
           </>
         )}
 
+        {/* 🎯 РАСШИРЕННАЯ АНАЛИТИКА В ЧАСАХ И ДНЯХ */}
         {currentTab === 'analytics' && (
           <>
-            <div className="premium-card">
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта</h3>
-              <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | 90% вагонов: <b>{drCycle.p90} дн</b></span></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Капитальный ремонт (КР):</b></span><span>Медиана: <b>{krCycle.median} дн</b> | 90% вагонов: <b>{krCycle.p90} дн</b></span></div>
+            {/* БЛОК 1: ОБЩИЙ НАЛЁТ ЧАСОВ */}
+            <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>📊 Сводный простой всех вагонов</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Общий налёт времени:</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{Math.round(totalDwellHours).toLocaleString()} ч</div>
+                  <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({totalDwellDays} вагон-дней)</div>
+                </div>
+                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Средний простой 1 вагона:</div>
+                  <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{avgHoursPerWagon} ч</div>
+                  <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({avgDaysPerWagon} дн/вагон)</div>
+                </div>
               </div>
             </div>
+
+            {/* БЛОК 2: ЦИКЛ РЕМОНТА ПО ТИПАМ В ЧАСАХ И ДНЯХ */}
             <div className="premium-card">
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Парето)</h3>
-              {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
-                <div key={cat} style={{ marginBottom: '8px' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div><div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div></div>
-              ))}
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>⏱️ Время цикла по видам ремонта</h3>
+              <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                    <span>🛠️ Деповской ремонт (ДР) — {drStats.count} ваг.</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                    <span>Медиана: <b>{drStats.medianHours} ч</b> ({drStats.medianDays} дн)</span>
+                    <span>90% вагонов: <b>{drStats.p90Hours} ч</b> ({drStats.p90Days} дн)</span>
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                    <span>🔄 Переоборудование (КРП) — {krpStats.count} ваг.</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                    <span>Медиана: <b>{krpStats.medianHours} ч</b> ({krpStats.medianDays} дн)</span>
+                    <span>90% вагонов: <b>{krpStats.p90Hours} ч</b> ({krpStats.p90Days} дн)</span>
+                  </div>
+                </div>
+
+                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                    <span>🔧 Текущий ремонт (ТР) — {trStats.count} ваг.</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                    <span>Медиана: <b>{trStats.medianHours} ч</b> ({trStats.medianDays} дн)</span>
+                    <span>90% вагонов: <b>{trStats.p90Hours} ч</b> ({trStats.p90Days} дн)</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* БЛОК 3: ПАРЕТО С ПЕРЕВОДОМ НА РУССКИЙ И ЧАСАМИ */}
+            <div className="premium-card">
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--danger)' }}>🚨 Структура потерь и задержек (Парето)</h3>
+              {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => {
+                const hours = Math.round(days * 24);
+                const percent = Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100);
+                const ruCat = CATEGORY_RU[cat] || cat;
+
+                return (
+                  <div key={cat} style={{ marginBottom: '10px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 'bold', marginBottom: '4px' }}>
+                      <span>{ruCat}</span>
+                      <span style={{ color: 'var(--danger)' }}>{hours.toLocaleString()} ч ({days.toFixed(1)} дн)</span>
+                    </div>
+                    <div style={{ background: 'rgba(255,59,48,0.1)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ width: `${percent}%`, background: 'var(--danger)', height: '100%', borderRadius: '4px' }} />
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      {percent.toFixed(1)}% от всех задержек депо
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
