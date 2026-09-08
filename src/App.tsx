@@ -40,26 +40,33 @@ interface DelayLog {
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
+
+// 🎯 ДОБАВЛЕН ХОЛОДИЛЬНЫЙ ЦЕХ
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
   { key: 'brakes', label: 'Автотормозной цех' },
-  { key: 'body', label: 'Кузовной / Сварочный' }
+  { key: 'body', label: 'Кузовной / Сварочный' },
+  { key: 'cooling', label: 'Холодильный цех' }
 ];
+
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
+
+// 🎯 ОБНОВЛЕНЫ РОЛИ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
   { key: 'procurement', label: '📦 Отдел снабжения / Закупки (Материалы)' },
-  { key: 'mechanic', label: '🛠 Служба главного механика (Оборудование)' },
+  { key: 'mechanic', label: '🛠 Начальник цеха (отвечает за ремонт и за остальные цеха)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
   { key: 'body', label: '🔨 Мастер Кузовного цеха' },
+  { key: 'cooling', label: '❄️ Мастер Холодильного цеха' },
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
@@ -75,13 +82,15 @@ export default function App() {
   const [timeMetricsList, setTimeMetricsList] = useState<RepairTimeMetrics[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
+  // 🎯 ОБНОВЛЕНЫ НАСТРОЙКИ ПО УМОЛЧАНИЮ ДЛЯ МАСТЕРОВ
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
     procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
-    mechanic: { label: 'Служба главного механика', master: 'Смирнов А.А.', tg: '@depo_mechanic', role: 'MECHANIC', targetHours: 0 },
+    mechanic: { label: 'Начальник цеха (отвечает за ремонт и за остальные цеха)', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
     body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
+    cooling: { label: 'Холодильный цех', master: 'Морозов М.М.', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
     docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
   });
 
@@ -203,14 +212,7 @@ export default function App() {
     const defaultOwner = ownerType === 'Own' ? 'ПРОМТРАНС' : 'Сторонний';
 
     for (const num of numbers) {
-      const { error } = await supabase.rpc('create_repair_case', { 
-        p_wagon_number: num, 
-        p_repair_type: defaultRepairType, 
-        p_user_id: user?.id, 
-        p_wagon_type: defaultWagonType, 
-        p_owner: defaultOwner, 
-        p_owner_type: ownerType 
-      });
+      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: defaultRepairType, p_user_id: user?.id, p_wagon_type: defaultWagonType, p_owner: defaultOwner, p_owner_type: ownerType });
       if (!error) { successCount++; addedWagons.push(num); } else { lastDbError = error.message; }
     }
     
@@ -395,7 +397,6 @@ export default function App() {
         {currentTab === 'analytics' && (
           <>
             <div className="premium-card">
-              {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
               <h3 style={{ margin: '0 0 8px 0', fontSize: '14px' }}>⏱️ Цикл ремонта</h3>
               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}><span><b>Деповской ремонт (ДР):</b></span><span>Медиана: <b>{drCycle.median} дн</b> | 90% вагонов: <b>{drCycle.p90} дн</b></span></div>
@@ -403,7 +404,6 @@ export default function App() {
               </div>
             </div>
             <div className="premium-card">
-              {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
               <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>Аналитика потерь (Парето)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => (
                 <div key={cat} style={{ marginBottom: '8px' }}><div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '2px' }}><span><b>{cat}</b></span><span>{days.toFixed(1)} вагон-дней</span></div><div style={{ background: 'var(--bg-color)', height: '6px', borderRadius: '3px' }}><div style={{ width: `${Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100)}%`, background: 'var(--danger)', height: '100%', borderRadius: '3px' }} /></div></div>
@@ -592,7 +592,6 @@ export default function App() {
               <>
                 {selectedMetrics && (
                   <div className="premium-card">
-                    {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
                     <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Анализ времени простоя</h4>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
                       <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
@@ -651,7 +650,6 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
             
-            {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
             <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
               <option value="PRIMARY">Основная задержка</option>
               <option value="SECONDARY">Сопутствующая задержка</option>
@@ -660,14 +658,13 @@ export default function App() {
             <select className="select-field" value={delayCategory} onChange={e => {
                 const cat = e.target.value; setDelayCategory(cat);
                 if (cat === 'Materials') { const info = shopMasters.procurement; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки'); } 
-                else if (cat === 'Equipment') { const info = shopMasters.mechanic; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Служба главного механика'); } 
+                else if (cat === 'Equipment') { const info = shopMasters.mechanic; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Начальник цеха'); } 
                 else { setResponsibleParty(''); }
               }}>
               <option value="Materials">Материалы / Запчасти</option><option value="Equipment">Поломка оборудования</option><option value="Customer">Заказчик</option><option value="Railway">ЖД</option>
             </select>
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
-            {/* 🎯 ОЧИЩЕНО ОТ АНГЛИЦИЗМОВ */}
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Следующее действие" />
             <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
 
