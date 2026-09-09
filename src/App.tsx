@@ -49,7 +49,6 @@ interface WarehouseItem { id: string; name: string; category: string; quantity: 
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
-// 🎯 ЧИСТЫЙ СПИСОК ЦЕХОВ БЕЗ ЦИФРОВЫХ ИНДЕКСОВ
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
@@ -66,7 +65,6 @@ const TRACKS_CONFIG = [
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
 
-// 🎯 ОБНОВЛЕННЫЙ СПИСОК РОЛЕЙ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
@@ -114,7 +112,6 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // 🎯 ЧИСТЫЕ НАЗВАНИЯ В НАСТРОЙКАХ СТАФФА
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
     procurement: { label: 'Отдел снабжения / Закупки', master: 'Рустамжон', tg: '@Rustamjon_5171', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цехов', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
@@ -420,7 +417,7 @@ export default function App() {
       setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_new_status: newStatus, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
+    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
     if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
@@ -909,14 +906,17 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* Модалка: ПРИХОД / ИЗМЕНЕНИЕ ПОЗИЦИИ СКЛАДА */}
+      {/* 🎯 ПОНЯТНАЯ И НАГЛЯДНАЯ МОДАЛКА СКЛАДА */}
       {showItemModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Редактирование ТМЦ' : 'Приход на склад'}</h3>
-            <input className="input-field" type="text" placeholder="Наименование детали / материала" value={itemName} onChange={e => setItemName(e.target.value)} />
             
-            <select className="select-field" value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Наименование позиции:</label>
+            <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
+            
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Цех / Категория:</label>
+            <select className="select-field" style={{ marginTop: '2px' }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
               <option value="Холодильный цех">❄️ Холодильный цех</option>
               <option value="Колёсный цех">⚙️ Колёсный цех</option>
               <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
@@ -928,11 +928,18 @@ export default function App() {
             </select>
 
             <div style={{ display: 'flex', gap: '6px' }}>
-              <input className="input-field" style={{ flex: 1 }} type="number" placeholder="Количество" value={itemQty} onChange={e => setItemQty(e.target.value)} />
-              <input className="input-field" style={{ flex: 0.8 }} type="text" placeholder="Ед. изм (шт/л/кг)" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Количество:</label>
+                <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="10" value={itemQty} onChange={e => setItemQty(e.target.value)} />
+              </div>
+              <div style={{ flex: 0.8 }}>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Ед. изм.:</label>
+                <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="шт / л / кг" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
+              </div>
             </div>
 
-            <input className="input-field" type="number" placeholder="Минимальный остаток (норма)" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Минимальный неснижаемый остаток (порог дефицита):</label>
+            <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="5" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
               <button className="btn-secondary" onClick={() => setShowItemModal(false)}>Отмена</button>
