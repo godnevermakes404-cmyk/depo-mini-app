@@ -435,12 +435,26 @@ export default function App() {
     setLoading(false);
   }
 
+  // 🎯 ОБНОВЛЕННАЯ ФУНКЦИЯ ПОДПИСИ С ВЫВОДОМ ОШИБКИ ИЗ БД
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
+    vibrate('medium');
     const signLabel = getMasterLabel(shopKey);
-    const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_user_name: signLabel, p_user_id: user?.id });
-    if (!error) { notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs }); loadData(); }
+    const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { 
+      p_repair_id: selectedCase.repair_id, 
+      p_shop_key: shopKey, 
+      p_user_name: signLabel, 
+      p_user_id: user?.id 
+    });
+
+    if (!error) { 
+      notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
+      setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs }); 
+      loadData(); 
+    } else {
+      alert('Ошибка подписи акта: ' + error.message);
+    }
     setLoading(false);
   }
 
