@@ -108,6 +108,12 @@ export default function App() {
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
 
+  // 🎯 Новое состояние быстрого прихода / расхода
+  const [showStockAdjustModal, setShowStockAdjustModal] = useState<boolean>(false);
+  const [adjustingItem, setAdjustingItem] = useState<WarehouseItem | null>(null);
+  const [stockDelta, setStockDelta] = useState<string>('10');
+  const [adjustMode, setAdjustMode] = useState<'ADD' | 'SUBTRACT'>('ADD');
+
   const [repairs, setRepairs] = useState<RepairCase[]>([]);
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
@@ -218,6 +224,41 @@ export default function App() {
     }
     alert('Персонал сохранен!'); setLoading(false); loadData();
   }
+
+  // 🎯 АВТОМАТИЧЕСКОЕ СУММИРОВАНИЕ ПРИХОДА ИЛИ РАСХОДА
+  async function handleConfirmStockAdjust() {
+    if (!adjustingItem || !stockDelta.trim()) return;
+    const amount = Number(stockDelta);
+    if (isNaN(amount) || amount <= 0) {
+      alert('Введите корректное количество!');
+      return;
+    }
+
+    setLoading(true); vibrate('heavy');
+    const finalDelta = adjustMode === 'ADD' ? amount : -amount;
+
+    const { error } = await supabase.rpc('add_warehouse_stock', {
+      p_id: adjustingItem.id,
+      p_delta: finalDelta,
+      p_user_id: user?.id
+    });
+
+    if (!error) {
+      setShowStockAdjustModal(false);
+      setAdjustingItem(null);
+      loadData();
+    } else {
+      alert('Ошибка изменения остатков: ' + error.message);
+    }
+    setLoading(false);
+  }
+
+  const openStockAdjustModal = (item: WarehouseItem, mode: 'ADD' | 'SUBTRACT') => {
+    setAdjustingItem(item);
+    setAdjustMode(mode);
+    setStockDelta('10');
+    setShowStockAdjustModal(true);
+  };
 
   async function handleSaveWarehouseItem() {
     if (!itemName.trim()) { alert('Введите наименование позиции!'); return; }
@@ -557,7 +598,7 @@ export default function App() {
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
             </div>
             <div className="premium-card">
@@ -705,7 +746,7 @@ export default function App() {
               <h3 style={{ margin: 0, fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
               {canManageWarehouse && (
                 <button className="btn-primary" style={{ padding: '4px 10px', fontSize: '11px', width: 'auto' }} onClick={() => openAddItemModal()}>
-                  + Приход / Добавить
+                  + Новый товар
                 </button>
               )}
             </div>
@@ -747,11 +788,11 @@ export default function App() {
                   <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--danger)' : isLowStock ? '4px solid var(--warning)' : '4px solid var(--success)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
-                        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{item.name}</div>
+                        <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{item.name}</div>
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{item.category}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '15px', fontWeight: '800', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
+                        <div style={{ fontSize: '16px', fontWeight: '800', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
                           {item.quantity} {item.unit}
                         </div>
                         <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
@@ -765,10 +806,31 @@ export default function App() {
                         {isOutOfStock ? '🔴 Нет на складе (Дефицит)' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
                       </span>
 
+                      {/* 🎯 КНОПКИ БЫСТРОГО ПРИХОДА/РАСХОДА И РЕДАКТИРОВАНИЯ */}
                       {canManageWarehouse && (
-                        <button className="btn-secondary" style={{ padding: '2px 8px', fontSize: '10px', width: 'auto' }} onClick={() => openAddItemModal(item)}>
-                          ✏️ Изменить
-                        </button>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button 
+                            className="btn-primary" 
+                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: 'var(--success)' }} 
+                            onClick={() => openStockAdjustModal(item, 'ADD')}
+                          >
+                            + Приход
+                          </button>
+                          <button 
+                            className="btn-secondary" 
+                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', color: 'var(--danger)' }} 
+                            onClick={() => openStockAdjustModal(item, 'SUBTRACT')}
+                          >
+                            − Списать
+                          </button>
+                          <button 
+                            className="btn-secondary" 
+                            style={{ padding: '3px 6px', fontSize: '10px', width: 'auto' }} 
+                            onClick={() => openAddItemModal(item)}
+                          >
+                            ✏️
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -906,11 +968,61 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* 🎯 ПОНЯТНАЯ И НАГЛЯДНАЯ МОДАЛКА СКЛАДА */}
+      {/* 🎯 МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА (С АВТОМАТИЧЕСКИМ СУММИРОВАНИЕМ) */}
+      {showStockAdjustModal && adjustingItem && (
+        <div className="backdrop">
+          <div className="bottom-sheet">
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>
+              {adjustMode === 'ADD' ? '📥 Приход на склад' : '📤 Списание со склада'}
+            </h3>
+            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--brand-color)', marginBottom: '10px' }}>
+              {adjustingItem.name}
+            </div>
+
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>
+              {adjustMode === 'ADD' ? 'Сколько поступило (добавить):' : 'Сколько списать:'}
+            </label>
+            <input 
+              className="input-field" 
+              style={{ marginTop: '4px', fontSize: '16px', fontWeight: 'bold' }} 
+              type="number" 
+              placeholder="10" 
+              value={stockDelta} 
+              onChange={e => setStockDelta(e.target.value)} 
+            />
+
+            {/* 🎯 АВТОМАТИЧЕСКИЙ РАСЧЕТ И ПРЕВЬЮ */}
+            <div style={{ background: 'var(--bg-color)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
+              <div>В наличии сейчас: <b>{adjustingItem.quantity} {adjustingItem.unit}</b></div>
+              <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>
+                Станет на складе: {
+                  adjustMode === 'ADD'
+                    ? Number(adjustingItem.quantity) + (Number(stockDelta) || 0)
+                    : Math.max(0, Number(adjustingItem.quantity) - (Number(stockDelta) || 0))
+                } {adjustingItem.unit}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+              <button className="btn-secondary" onClick={() => setShowStockAdjustModal(false)}>Отмена</button>
+              <button 
+                className="btn-primary" 
+                style={{ background: adjustMode === 'ADD' ? 'var(--success)' : 'var(--danger)' }} 
+                onClick={handleConfirmStockAdjust} 
+                disabled={loading}
+              >
+                {adjustMode === 'ADD' ? '✓ Подтвердить приход' : '✓ Подтвердить списание'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* МОДАЛКА СОЗДАНИЯ / ИНВЕНТАРИЗАЦИИ ПАРАМЕТРОВ ТОВАРА */}
       {showItemModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Редактирование ТМЦ' : 'Приход на склад'}</h3>
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Параметры и ревизия ТМЦ' : 'Новый товар на склад'}</h3>
             
             <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Наименование позиции:</label>
             <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
@@ -929,7 +1041,7 @@ export default function App() {
 
             <div style={{ display: 'flex', gap: '6px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Количество:</label>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Текущий остаток:</label>
                 <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="10" value={itemQty} onChange={e => setItemQty(e.target.value)} />
               </div>
               <div style={{ flex: 0.8 }}>
@@ -938,7 +1050,7 @@ export default function App() {
               </div>
             </div>
 
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Минимальный неснижаемый остаток (порог дефицита):</label>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Минимальный порог дефицита:</label>
             <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="5" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
