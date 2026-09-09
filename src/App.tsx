@@ -60,11 +60,6 @@ const DEFAULT_SHOPS = [
   { key: 'mech_equip', label: 'Цех механического оборудования' }
 ];
 
-const TRACKS_CONFIG = [
-  { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
-  { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
-];
-
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
@@ -108,7 +103,7 @@ export default function App() {
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
 
-  // 🎯 Новое состояние быстрого прихода / расхода
+  // Быстрый приход / расход
   const [showStockAdjustModal, setShowStockAdjustModal] = useState<boolean>(false);
   const [adjustingItem, setAdjustingItem] = useState<WarehouseItem | null>(null);
   const [stockDelta, setStockDelta] = useState<string>('10');
@@ -225,7 +220,6 @@ export default function App() {
     alert('Персонал сохранен!'); setLoading(false); loadData();
   }
 
-  // 🎯 АВТОМАТИЧЕСКОЕ СУММИРОВАНИЕ ПРИХОДА ИЛИ РАСХОДА
   async function handleConfirmStockAdjust() {
     if (!adjustingItem || !stockDelta.trim()) return;
     const amount = Number(stockDelta);
@@ -598,30 +592,8 @@ export default function App() {
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
-            </div>
-            <div className="premium-card">
-              <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>🗺️ Схема ремонтных путей депо</h4>
-              <div className="tracks-grid">
-                {TRACKS_CONFIG.map(tr => (
-                  <div key={tr.track} className="track-row">
-                    <div className="track-title"><span>{tr.track}</span><span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>3 позиции</span></div>
-                    <div className="positions-container">
-                      {tr.positions.map(pos => {
-                        const wagonOnPos = repairs.find(r => r.track_number === tr.track && r.position_number === pos);
-                        const isPaused = wagonOnPos?.current_status === CASE_STATUS.PAUSED;
-                        return (
-                          <div key={pos} className={`position-slot ${wagonOnPos ? 'occupied' : ''} ${isPaused ? 'overdue' : ''}`} onClick={() => wagonOnPos && openCaseDetails(wagonOnPos)}>
-                            <span className="slot-label">{pos}</span>
-                            {wagonOnPos ? <span className="slot-wagon" style={{ color: isPaused ? 'var(--danger)' : 'var(--brand-color)' }}>№{wagonOnPos.wagons?.wagon_number}</span> : <span className="slot-empty">Свободно</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           </>
         )}
@@ -806,7 +778,6 @@ export default function App() {
                         {isOutOfStock ? '🔴 Нет на складе (Дефицит)' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
                       </span>
 
-                      {/* 🎯 КНОПКИ БЫСТРОГО ПРИХОДА/РАСХОДА И РЕДАКТИРОВАНИЯ */}
                       {canManageWarehouse && (
                         <div style={{ display: 'flex', gap: '4px' }}>
                           <button 
@@ -968,7 +939,7 @@ export default function App() {
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
 
-      {/* 🎯 МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА (С АВТОМАТИЧЕСКИМ СУММИРОВАНИЕМ) */}
+      {/* МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА */}
       {showStockAdjustModal && adjustingItem && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -991,7 +962,6 @@ export default function App() {
               onChange={e => setStockDelta(e.target.value)} 
             />
 
-            {/* 🎯 АВТОМАТИЧЕСКИЙ РАСЧЕТ И ПРЕВЬЮ */}
             <div style={{ background: 'var(--bg-color)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
               <div>В наличии сейчас: <b>{adjustingItem.quantity} {adjustingItem.unit}</b></div>
               <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>
