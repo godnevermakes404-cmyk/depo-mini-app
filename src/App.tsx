@@ -60,7 +60,6 @@ const TRACKS_CONFIG = [
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
 
-// 🎯 ДОБАВЛЕН ОТК В СПИСОК РОЛЕЙ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
@@ -104,7 +103,6 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // 🎯 ДОБАВЛЕН ОТК В НАСТРОЙКИ СТАФФА
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
     procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цеха (отвечает за ремонт и за остальные цеха)', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
@@ -288,6 +286,30 @@ export default function App() {
       else notifyWagonsArrivedBulk(addedWagons, defaultRepairType, defaultOwner, defaultWagonType);
       alert(`Успешно принято вагонов: ${successCount} шт.`); setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
     } else { alert(`Ошибка БД:\n${lastDbError}`); }
+    setLoading(false);
+  }
+
+  // 🔒 УДАЛЕНИЕ ВАГОНА ИЗ БАЗЫ (ТОЛЬКО АДМИН)
+  async function handleDeleteCase() {
+    if (activeRole !== 'ADMIN' || !selectedCase) return;
+    const wagonNum = selectedCase.wagons?.wagon_number || '';
+    if (!window.confirm(`Вы уверены, что хотите полностью удалить вагон №${wagonNum} из базы данных? Это действие нельзя отменить.`)) {
+      return;
+    }
+
+    setLoading(true); vibrate('heavy');
+    const { error } = await supabase.rpc('delete_repair_case', {
+      p_repair_id: selectedCase.repair_id,
+      p_user_id: user?.id
+    });
+
+    if (!error) {
+      alert(`Вагон №${wagonNum} успешно удален из базы.`);
+      setSelectedCase(null);
+      loadData();
+    } else {
+      alert('Ошибка удаления вагона: ' + error.message);
+    }
     setLoading(false);
   }
 
@@ -1071,6 +1093,18 @@ export default function App() {
                   </div>
                 </div>
               </>
+            )}
+
+            {/* 🎯 КНОПКА УДАЛЕНИЯ ВАГОНА ДЛЯ АДМИНА */}
+            {activeRole === 'ADMIN' && (
+              <button 
+                className="btn-primary" 
+                style={{ background: 'var(--danger)', marginTop: '12px', width: '100%' }} 
+                onClick={handleDeleteCase} 
+                disabled={loading}
+              >
+                🗑️ Удалить вагон из базы
+              </button>
             )}
           </div>
         </div>
