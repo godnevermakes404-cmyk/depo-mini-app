@@ -17,6 +17,7 @@
 
   --border-subtle: rgba(226, 232, 240, 0.8);
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
 }
 
 body {
@@ -28,6 +29,7 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* ШАПКА */
 .brand-header {
   display: flex;
   justify-content: space-between;
@@ -60,6 +62,7 @@ body {
   border: 1px solid rgba(37, 99, 235, 0.15);
 }
 
+/* ОСНОВНОЙ КОНТЕЙНЕР */
 .content-area {
   padding: 14px 14px 90px 14px;
   display: flex;
@@ -67,6 +70,7 @@ body {
   gap: 12px;
 }
 
+/* BENTO КАРТОЧКИ */
 .premium-card {
   background: var(--card-bg);
   border-radius: 16px;
@@ -74,12 +78,14 @@ body {
   box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-subtle);
   transition: transform 0.1s ease;
+  cursor: pointer; /* 🎯 КЛИКАБЕЛЬНОСТЬ ДЛЯ SAFARI И IPHONE */
 }
 
 .premium-card:active {
   transform: scale(0.99);
 }
 
+/* СЕТКА СТАТИСТИКИ */
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -94,7 +100,7 @@ body {
   justify-content: space-between;
   border: 1px solid transparent;
   transition: transform 0.15s ease;
-  cursor: pointer; /* 🎯 ИСПРАВЛЕНИЕ ДЛЯ IPHONE (КЛИКАБЕЛЬНОСТЬ) */
+  cursor: pointer; /* 🎯 КЛИКАБЕЛЬНОСТЬ ДЛЯ SAFARI И IPHONE */
 }
 
 .stat-box:active {
@@ -126,6 +132,7 @@ body {
   color: var(--text-primary);
 }
 
+/* КНОПКИ */
 .btn-primary {
   background: var(--brand);
   color: #ffffff;
@@ -162,6 +169,7 @@ body {
   transform: scale(0.97);
 }
 
+/* НИЖНЕЕ МЕНЮ */
 .bottom-nav {
   position: fixed;
   bottom: 0;
@@ -209,7 +217,7 @@ body {
   stroke-linejoin: round;
 }
 
-/* ПОЛЯ ВВОДА И СЕЛЕКТЫ */
+/* ПОЛЯ ВВОДА, СЕЛЕКТЫ И ПОИСК */
 .input-field, .select-field, .textarea-field {
   width: 100%;
   background: #f8fafc;
@@ -267,4 +275,81 @@ body {
 
 .filters-grid select {
   width: 100%;
+}
+
+/* МОДАЛЬНЫЕ ОКНА И НИЖНИЕ ШТОРКИ (BOTTOM SHEET) */
+.backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 300;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.bottom-sheet {
+  background: #ffffff;
+  width: 100%;
+  max-width: 500px;
+  max-height: 85vh;
+  overflow-y: auto;
+  border-radius: 20px 20px 0 0;
+  padding: 16px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  background: #cbd5e1;
+  border-radius: 2px;
+  margin: 0 auto 8px auto;
+}
+
+/* ПЛАВАЮЩАЯ КНОПКА ДОБАВЛЕНИЯ (FAB) */
+.fab {
+  position: fixed;
+  bottom: 78px;
+  right: 18px;
+  width: 52px;
+  height: 52px;
+  border-radius: 26px;
+  background: var(--brand);
+  color: #ffffff;
+  border: none;
+  font-size: 24px;
+  font-weight: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+  cursor: pointer;
+  z-index: 150;
+  transition: transform 0.15s ease;
+}
+
+.fab:active {
+  transform: scale(0.92);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
 }

@@ -851,7 +851,12 @@ export default function App() {
                 const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
 
                 return (
-                  <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--status-paused)' : 'none' }}>
+                  <div 
+                    key={item.repair_id} 
+                    className="premium-card" 
+                    onClick={() => openCaseDetails(item)} 
+                    style={{ cursor: 'pointer', borderLeft: isBreached ? '4px solid var(--status-paused)' : 'none' }}
+                  >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
                       <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
@@ -886,7 +891,7 @@ export default function App() {
         {currentTab === 'warehouse' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
               {canManageWarehouse && (
                 <button className="btn-primary" style={{ padding: '4px 10px', fontSize: '11px', width: 'auto' }} onClick={() => openAddItemModal()}>
                   + Новый товар
