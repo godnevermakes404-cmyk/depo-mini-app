@@ -568,94 +568,102 @@ export default function App() {
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
   if (isOutsideTelegram) {
-    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-color)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--danger)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-muted)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
+    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
   }
 
   return (
     <div>
-      <header className="brand-header"><h1 className="brand-title">ДЕПО TMS</h1><span className="status-pill">{user?.name}</span></header>
+      <header className="brand-header">
+        <h1 className="brand-title">ДЕПО TMS</h1>
+        <span className="status-pill">{user?.name}</span>
+      </header>
 
       <div className="content-area">
         {currentTab === 'home' && (
           <>
-            {/* 1. АЛАРМЫ ДИСПЕТЧЕРА */}
+            {/* 1. БАННЕР-АЛАРМ ДИСПЕТЧЕРА */}
             {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
-              <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
-                <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                  {forecastBreaches.length > 0 && <div><b>⚠️ Риск срыва нормативного срока:</b> {forecastBreaches.length} ваг.</div>}
-                  {readyNotDispatched.length > 0 && <div><b>🚂 Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
-                  {dqViolations.map((v, i) => <div key={i}><b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
+              <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)', background: 'var(--status-paused-bg)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <svg className="nav-icon-svg" style={{ stroke: 'var(--status-paused)', width: '18px', height: '18px' }} viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <h4 style={{ margin: 0, color: 'var(--status-paused)', fontSize: '13px', fontWeight: '800' }}>Требуют внимания диспетчера</h4>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#7f1d1d' }}>
+                  {forecastBreaches.length > 0 && <div>• <b>Риск срыва SLA:</b> {forecastBreaches.length} ваг.</div>}
+                  {readyNotDispatched.length > 0 && <div>• <b>Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
+                  {dqViolations.map((v, i) => <div key={i}>• <b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
                 </div>
               </div>
             )}
 
-            <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length} ваг.</h3>
-            
-            {/* 2. СТАТИСТИКА */}
-            <div className="stats-grid">
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '4px 0 2px 0' }}>
+              <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)' }}>На территории депо</span>
+              <span style={{ fontSize: '18px', fontWeight: '900', color: 'var(--brand)' }}>{onSiteRepairs.length} ваг.</span>
             </div>
 
-            {/* 3. БЫСТРЫЕ ДЕЙСТВИЯ (QUICK ACTIONS) */}
-            <div className="premium-card" style={{ padding: '10px' }}>
-              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⚡ Быстрые действия</h4>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+            {/* 2. BENTO СЕТКА СТАТИСТИКИ */}
+            <div className="stats-grid">
+              <div className="stat-box queue" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}>
+                <span className="stat-label">В очереди</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span>
+              </div>
+              <div className="stat-box repair" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}>
+                <span className="stat-label">В ремонте</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
+              </div>
+              <div className="stat-box paused" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>
+                <span className="stat-label">Задержано</span>
+                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
+              </div>
+              <div className="stat-box ready" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}>
+                <span className="stat-label">Готовы</span>
+                <span className="stat-value">{readyNotDispatched.length}</span>
+              </div>
+            </div>
+
+            {/* 3. БЫСТРЫЕ ДЕЙСТВИЯ */}
+            <div className="premium-card">
+              <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+                ⚡ Быстрые действия
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 {(activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
-                  <button className="btn-primary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setShowAddModal(true)}>
-                    ➕ Принять вагон
-                  </button>
+                  <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Принять вагон</button>
                 )}
                 {canManageWarehouse && (
-                  <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => openAddItemModal()}>
-                    📦 Новый товар
-                  </button>
+                  <button className="btn-secondary" onClick={() => openAddItemModal()}>+ Новый товар</button>
                 )}
-                <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setCurrentTab('warehouse')}>
-                  🔍 Склад ТМЦ
-                </button>
-                <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setCurrentTab('analytics')}>
-                  📊 Аналитика
-                </button>
+                <button className="btn-secondary" onClick={() => setCurrentTab('warehouse')}>📦 Склад ТМЦ</button>
+                <button className="btn-secondary" onClick={() => setCurrentTab('analytics')}>📊 Аналитика</button>
               </div>
             </div>
 
             {/* 4. РАЗБОР ЗАДЕРЖАННЫХ ВАГОНОВ */}
             {(() => {
               const activeDelays = delayLogs.filter(d => !d.end_datetime);
+              if (activeDelays.length === 0) return null;
               const matCount = activeDelays.filter(d => d.category === 'Materials').length;
               const eqCount = activeDelays.filter(d => d.category === 'Equipment').length;
               const custCount = activeDelays.filter(d => d.category === 'Customer').length;
-              const rwCount = activeDelays.filter(d => d.category === 'Railway').length;
-
-              if (activeDelays.length === 0) return null;
 
               return (
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--danger)' }}>🛑 Разбор задержек ({activeDelays.length} ваг.)</h4>
-                    <span style={{ fontSize: '10px', color: 'var(--brand-color)', cursor: 'pointer', fontWeight: 'bold' }} onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>Все задержки →</span>
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-paused)' }}>🛑 Разбор задержек ({activeDelays.length})</span>
+                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>Все →</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
                       <span>📦 Запчасти / Материалы: <b>{matCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Отв: Рустамжон</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Отв: Рустамжон</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
-                      <span>🛠 Поломка оборудования: <b>{eqCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Отв: Абдурахмонжон</span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
+                      <span>🛠 Оборудование: <b>{eqCount} ваг.</b></span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Отв: Абдурахмонжон</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
                       <span>👤 Ждём решения Заказчика: <b>{custCount} ваг.</b></span>
                     </div>
-                    {rwCount > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
-                        <span>🚂 Железная дорога (ЖД): <b>{rwCount} ваг.</b></span>
-                      </div>
-                    )}
                   </div>
                 </div>
               );
@@ -672,7 +680,7 @@ export default function App() {
 
               return (
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🔥 Вагоны с наибольшим простоем</h4>
+                  <div style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px' }}>🔥 Наибольший простой</div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {criticalWagons.map(item => {
                       const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - new Date(item.created_at).getTime()) / (1000 * 60 * 60 * 24)));
@@ -681,18 +689,18 @@ export default function App() {
                       return (
                         <div 
                           key={item.repair_id} 
-                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', cursor: 'pointer' }}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', cursor: 'pointer' }}
                           onClick={() => openCaseDetails(item)}
                         >
                           <div>
                             <div style={{ fontWeight: 'bold', fontSize: '12px' }}>№ {item.wagons?.wagon_number}</div>
-                            <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</div>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontWeight: 'bold', color: isPaused ? 'var(--danger)' : daysOnSite > 3 ? 'var(--warning)' : 'var(--brand-color)' }}>
-                              {daysOnSite} дн. в депо
+                            <span style={{ fontWeight: '800', color: isPaused ? 'var(--status-paused)' : daysOnSite > 3 ? 'var(--status-queue)' : 'var(--brand)' }}>
+                              {daysOnSite} дн.
                             </span>
-                            <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{STATUS_RU[item.current_status] || item.current_status}</div>
+                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>{STATUS_RU[item.current_status] || item.current_status}</div>
                           </div>
                         </div>
                       );
@@ -708,18 +716,18 @@ export default function App() {
               if (deficitItems.length === 0) return null;
 
               return (
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--warning)' }}>
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--warning)' }}>⚠️ Внимание: Низкий остаток ТМЦ</h4>
-                    <span style={{ fontSize: '10px', color: 'var(--brand-color)', cursor: 'pointer', fontWeight: 'bold' }} onClick={() => setCurrentTab('warehouse')}>На склад →</span>
+                    <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-queue)' }}>⚠️ Низкий остаток ТМЦ</span>
+                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => setCurrentTab('warehouse')}>Склад →</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
                     {deficitItems.map(item => {
                       const isZero = Number(item.quantity) <= 0;
                       return (
-                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
-                          <span>{item.name} <span style={{ color: 'var(--text-muted)', fontSize: '9px' }}>({item.category})</span></span>
-                          <span style={{ fontWeight: 'bold', color: isZero ? 'var(--danger)' : 'var(--warning)' }}>
+                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 8px', borderRadius: '6px' }}>
+                          <span>{item.name} <span style={{ color: 'var(--text-secondary)', fontSize: '9px' }}>({item.category})</span></span>
+                          <span style={{ fontWeight: 'bold', color: isZero ? 'var(--status-paused)' : 'var(--status-queue)' }}>
                             {item.quantity} {item.unit} {isZero ? '(ДЕФИЦИТ)' : `(Мин: ${item.min_limit})`}
                           </span>
                         </div>
@@ -740,8 +748,8 @@ export default function App() {
               </h3>
               <div style={{ display: 'flex', gap: '6px' }}>
                 {isFilterActive && (
-                  <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--danger)' }} onClick={resetAllFilters}>
-                    Сбросить фильтры
+                  <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--status-paused)' }} onClick={resetAllFilters}>
+                    Сбросить
                   </button>
                 )}
                 <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
@@ -801,7 +809,7 @@ export default function App() {
             </div>
 
             {filteredRepairs.length === 0 ? (
-              <div className="premium-card" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: '12px' }}>
+              <div className="premium-card" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)', fontSize: '12px' }}>
                 🔍 Вагоны по выбранным фильтрам не найдены
               </div>
             ) : (
@@ -814,25 +822,25 @@ export default function App() {
                 const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
 
                 return (
-                  <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--danger)' : 'none' }}>
+                  <div key={item.repair_id} className="premium-card" onClick={() => openCaseDetails(item)} style={{ borderLeft: isBreached ? '4px solid var(--status-paused)' : 'none' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                       <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
                       <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
                     </div>
                     
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
                       <span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span>
-                      <span style={{ color: isBreached ? 'var(--danger)' : 'var(--text-muted)', fontWeight: isBreached ? 'bold' : 'normal' }}>
+                      <span style={{ color: isBreached ? 'var(--status-paused)' : 'var(--text-secondary)', fontWeight: isBreached ? 'bold' : 'normal' }}>
                         {isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '11px', color: 'var(--brand-color)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--brand)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       📅 Заход: {formattedDate} ({daysOnSite} дн.)
                     </div>
 
                     {activeDelay && (
-                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)', fontSize: '10px', color: 'var(--danger)' }}>
+                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)', fontSize: '10px', color: 'var(--status-paused)' }}>
                         <div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div>
                       </div>
                     )}
@@ -891,39 +899,39 @@ export default function App() {
                 const isLowStock = Number(item.quantity) <= Number(item.min_limit) && !isOutOfStock;
                 
                 return (
-                  <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--danger)' : isLowStock ? '4px solid var(--warning)' : '4px solid var(--success)' }}>
+                  <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--status-paused)' : isLowStock ? '4px solid var(--status-queue)' : '4px solid var(--status-ready)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                       <div>
                         <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{item.name}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{item.category}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{item.category}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '16px', fontWeight: '800', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
+                        <div style={{ fontSize: '16px', fontWeight: '800', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
                           {item.quantity} {item.unit}
                         </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
                           Мин. норма: {item.min_limit} {item.unit}
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 'bold', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
-                        {isOutOfStock ? '🔴 Нет на складе (Дефицит)' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 'bold', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
+                        {isOutOfStock ? '🔴 Нет на складе' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
                       </span>
 
                       {canManageWarehouse && (
                         <div style={{ display: 'flex', gap: '4px' }}>
                           <button 
                             className="btn-primary" 
-                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: 'var(--success)' }} 
+                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: 'var(--status-ready)' }} 
                             onClick={() => openStockAdjustModal(item, 'ADD')}
                           >
                             + Приход
                           </button>
                           <button 
                             className="btn-secondary" 
-                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', color: 'var(--danger)' }} 
+                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', color: 'var(--status-paused)' }} 
                             onClick={() => openStockAdjustModal(item, 'SUBTRACT')}
                           >
                             − Списать
@@ -947,18 +955,18 @@ export default function App() {
 
         {currentTab === 'analytics' && (
           <>
-            <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>📊 Сводный простой не завершенных вагонов</h3>
+            <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>📊 Сводный простой вагонов</h3>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
-                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Активный налёт времени:</div>
+                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Активный налёт времени:</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{Math.round(totalDwellHours).toLocaleString()} ч</div>
-                  <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({totalDwellDays} вагон-дней)</div>
+                  <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({totalDwellDays} вагон-дней)</div>
                 </div>
-                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Средний простой (активных):</div>
+                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Средний простой:</div>
                   <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{avgHoursPerWagon} ч</div>
-                  <div style={{ fontSize: '10px', color: 'var(--brand-color)' }}>({avgDaysPerWagon} дн/вагон)</div>
+                  <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({avgDaysPerWagon} дн/вагон)</div>
                 </div>
               </div>
             </div>
@@ -966,31 +974,31 @@ export default function App() {
             <div className="premium-card">
               <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>⏱️ Время цикла по видам ремонта</h3>
               <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
                     <span>🛠️ Деповской ремонт (ДР) — {drStats.count} ваг.</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
                     <span>Медиана: <b>{drStats.medianHours} ч</b> ({drStats.medianDays} дн)</span>
                     <span>90% вагонов: <b>{drStats.p90Hours} ч</b> ({drStats.p90Days} дн)</span>
                   </div>
                 </div>
 
-                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
                     <span>🔄 Переоборудование (КРП) — {krpStats.count} ваг.</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
                     <span>Медиана: <b>{krpStats.medianHours} ч</b> ({krpStats.medianDays} дн)</span>
                     <span>90% вагонов: <b>{krpStats.p90Hours} ч</b> ({krpStats.p90Days} дн)</span>
                   </div>
                 </div>
 
-                <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
                     <span>🔧 Текущий ремонт (ТР) — {trStats.count} ваг.</span>
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', fontSize: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
                     <span>Медиана: <b>{trStats.medianHours} ч</b> ({trStats.medianDays} дн)</span>
                     <span>90% вагонов: <b>{trStats.p90Hours} ч</b> ({trStats.p90Days} дн)</span>
                   </div>
@@ -999,23 +1007,23 @@ export default function App() {
             </div>
 
             <div className="premium-card">
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--danger)' }}>🚨 Структура потерь и задержек (Парето)</h3>
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--status-paused)' }}>🚨 Структура задержек (Парето)</h3>
               {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => {
                 const hours = Math.round(days * 24);
                 const percent = Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100);
                 const ruCat = CATEGORY_RU[cat] || cat;
 
                 return (
-                  <div key={cat} style={{ marginBottom: '10px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
+                  <div key={cat} style={{ marginBottom: '10px', background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 'bold', marginBottom: '4px' }}>
                       <span>{ruCat}</span>
-                      <span style={{ color: 'var(--danger)' }}>{hours.toLocaleString()} ч ({days.toFixed(1)} дн)</span>
+                      <span style={{ color: 'var(--status-paused)' }}>{hours.toLocaleString()} ч ({days.toFixed(1)} дн)</span>
                     </div>
-                    <div style={{ background: 'rgba(255,59,48,0.1)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ width: `${percent}%`, background: 'var(--danger)', height: '100%', borderRadius: '4px' }} />
+                    <div style={{ background: 'rgba(220, 38, 38, 0.1)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ width: `${percent}%`, background: 'var(--status-paused)', height: '100%', borderRadius: '4px' }} />
                     </div>
-                    <div style={{ textAlign: 'right', fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      {percent.toFixed(1)}% от всех задержек депо
+                    <div style={{ textAlign: 'right', fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                      {percent.toFixed(1)}% от всех задержек
                     </div>
                   </div>
                 );
@@ -1028,29 +1036,29 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />{user?.role === 'ADMIN' && <span style={{color: 'var(--brand-color)'}}>Симуляция: {currentRoleInfo?.label}</span>}</p>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />{user?.role === 'ADMIN' && <span style={{color: 'var(--brand)'}}>Симуляция: {currentRoleInfo?.label}</span>}</p>
             </div>
             {user?.role === 'ADMIN' ? (
               <>
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--brand-color)' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand-color)' }}>🔑 Режим тестирования ролей (Админ)</h4>
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Тестирование ролей (Админ)</h4>
                   <select className="select-field" style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} value={activeRole} onChange={e => handleRoleChange(e.target.value)}>
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </div>
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand-color)' }}>⚙️ Персонал и Нормативы ремонта цехов</h4>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>⚙️ Персонал и Нормативы цехов</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {Object.entries(shopMasters).map(([key, val]) => (
-                      <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-color)', padding: '8px', borderRadius: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand-color)' }}>{val.label}</span>
+                      <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)' }}>{val.label}</span>
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} type="text" value={val.master} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} placeholder="ФИО" />
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} type="text" value={val.tg} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} placeholder="@username" />
                           {key !== 'procurement' && key !== 'mechanic' && key !== 'deputy' && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
                               <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
-                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч.</span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ч.</span>
                             </div>
                           )}
                         </div>
@@ -1060,17 +1068,33 @@ export default function App() {
                   </div>
                 </div>
               </>
-            ) : (<div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '11px' }}>🔒 Панель управления доступна только Начальнику депо.</div>)}
+            ) : (<div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>🔒 Панель управления доступна только Начальнику депо.</div>)}
           </div>
         )}
       </div>
 
+      {/* НИЖНЕЕ МЕНЮ С ВЕКТОРНЫМИ ИКОНКАМИ */}
       <nav className="bottom-nav">
-        <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}><div className="nav-icon">🏠</div><span>Главная</span></button>
-        <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}><div className="nav-icon">🚆</div><span>Вагоны</span></button>
-        <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}><div className="nav-icon">📦</div><span>Склад</span></button>
-        <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}><div className="nav-icon">📊</div><span>Аналитика</span></button>
-        <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
+        <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          <span>Главная</span>
+        </button>
+        <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          <span>Вагоны</span>
+        </button>
+        <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <span>Склад</span>
+        </button>
+        <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          <span>Аналитика</span>
+        </button>
+        <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>Профиль</span>
+        </button>
       </nav>
 
       {/* МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА */}
@@ -1080,12 +1104,12 @@ export default function App() {
             <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>
               {adjustMode === 'ADD' ? '📥 Приход на склад' : '📤 Списание со склада'}
             </h3>
-            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--brand-color)', marginBottom: '10px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '10px' }}>
               {adjustingItem.name}
             </div>
 
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>
-              {adjustMode === 'ADD' ? 'Сколько поступило (добавить):' : 'Сколько списать:'}
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+              {adjustMode === 'ADD' ? 'Сколько поступило:' : 'Сколько списать:'}
             </label>
             <input 
               className="input-field" 
@@ -1096,9 +1120,9 @@ export default function App() {
               onChange={e => setStockDelta(e.target.value)} 
             />
 
-            <div style={{ background: 'var(--bg-color)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
+            <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
               <div>В наличии сейчас: <b>{adjustingItem.quantity} {adjustingItem.unit}</b></div>
-              <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--success)' : 'var(--danger)', fontWeight: 'bold' }}>
+              <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)', fontWeight: 'bold' }}>
                 Станет на складе: {
                   adjustMode === 'ADD'
                     ? Number(adjustingItem.quantity) + (Number(stockDelta) || 0)
@@ -1111,7 +1135,7 @@ export default function App() {
               <button className="btn-secondary" onClick={() => setShowStockAdjustModal(false)}>Отмена</button>
               <button 
                 className="btn-primary" 
-                style={{ background: adjustMode === 'ADD' ? 'var(--success)' : 'var(--danger)' }} 
+                style={{ background: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)' }} 
                 onClick={handleConfirmStockAdjust} 
                 disabled={loading}
               >
@@ -1128,10 +1152,10 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Параметры и ревизия ТМЦ' : 'Новый товар на склад'}</h3>
             
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Наименование позиции:</label>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Наименование позиции:</label>
             <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
             
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Цех / Категория:</label>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Цех / Категория:</label>
             <select className="select-field" style={{ marginTop: '2px' }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
               <option value="Холодильный цех">❄️ Холодильный цех</option>
               <option value="Колёсный цех">⚙️ Колёсный цех</option>
@@ -1145,16 +1169,16 @@ export default function App() {
 
             <div style={{ display: 'flex', gap: '6px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Текущий остаток:</label>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Текущий остаток:</label>
                 <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="10" value={itemQty} onChange={e => setItemQty(e.target.value)} />
               </div>
               <div style={{ flex: 0.8 }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Ед. изм.:</label>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ед. изм.:</label>
                 <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="шт / л / кг" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
               </div>
             </div>
 
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-muted)' }}>Минимальный порог дефицита:</label>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Минимальный порог дефицита:</label>
             <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="5" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
@@ -1173,7 +1197,7 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
             <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)" rows={3} />
-            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand-color)' : 'var(--text-muted)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
+            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand)' : 'var(--text-secondary)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
             
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
               <option value="Own">Собственный</option>
@@ -1198,14 +1222,14 @@ export default function App() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div>
                 <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
-                <span className="status-pill" style={{ color: 'var(--brand-color)' }}>{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
+                <span className="status-pill">{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
               </div>
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
             <div className="premium-card">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--brand-color)', fontWeight: 'bold' }}>
+                <div style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>
                   📅 Дата захода в депо: {new Date(selectedCase.created_at).toLocaleString('ru-RU')}
                 </div>
 
@@ -1258,7 +1282,7 @@ export default function App() {
             {/* БЛОК ЦЕХОВ */}
             {!isInitialPhase && (
               <div className="premium-card">
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ Этапы ремонта и Ответственные цехов</h4>
+                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ Этапы ремонта и Ответственные цехов</h4>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {DEFAULT_SHOPS.map(s => {
                     const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
@@ -1269,22 +1293,22 @@ export default function App() {
                     const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
 
                     return (
-                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'rgba(0, 122, 255, 0.08)' : 'var(--bg-color)', borderLeft: isInProgress ? '3px solid var(--brand-color)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>{s.label}
-                            <span style={{ color: timeInfo.isOverdue ? 'var(--danger)' : isInProgress ? 'var(--brand-color)' : 'var(--text-muted)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
+                            <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
                               ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
                             </span>
                           </div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand-color)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
                         </div>
                         <div>
                           {isDone ? (
-                            <span style={{ color: 'var(--success)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                            <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
                           ) : isInProgress ? (
-                            canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand-color)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
+                            canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
                           ) : (
-                            canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>⏳ Ожидает</span>
+                            canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>⏳ Ожидает</span>
                           )}
                         </div>
                       </div>
@@ -1297,12 +1321,12 @@ export default function App() {
             {isInitialPhase ? (
               <>
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
                   
-                  <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <div style={{ fontWeight: 'bold' }}>📸 Фото / Скан Акта ВУ-22:</div>
-                      <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--success)' : 'var(--danger)', marginTop: '2px' }}>
+                      <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--status-ready)' : 'var(--status-paused)', marginTop: '2px' }}>
                         {hasActPhoto ? '✓ Файл прикреплен и верифицирован' : '❌ Файл не прикреплен (завоз заблокирован)'}
                       </div>
                     </div>
@@ -1317,7 +1341,7 @@ export default function App() {
 
                   {hasActPhoto && actPhotoDoc?.file_url && (
                     <div style={{ marginBottom: '8px', textAlign: 'right' }}>
-                      <a href={actPhotoDoc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand-color)', textDecoration: 'none', fontWeight: 'bold' }}>
+                      <a href={actPhotoDoc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 'bold' }}>
                         🔍 Открыть прикрепленное фото акта
                       </a>
                     </div>
@@ -1329,12 +1353,12 @@ export default function App() {
                       const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                       const canEdit = canPerformAction(s.key);
                       return (
-                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
-                            <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg}){sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
+                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg}){sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
                           </div>
-                          {sig?.signed ? <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>✓ Подписано</span> : (canEdit ? <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key)} disabled={loading}>Подписать</button> : <span style={{ color: 'var(--warning)', fontSize: '10px' }}>⏳ Ожидает</span>)}
+                          {sig?.signed ? <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span> : (canEdit ? <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key)} disabled={loading}>Подписать</button> : <span style={{ color: 'var(--status-queue)', fontSize: '10px' }}>⏳ Ожидает</span>)}
                         </div>
                       );
                     })}
@@ -1342,11 +1366,11 @@ export default function App() {
                 </div>
 
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
-                  {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
+                  {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--status-ready)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--status-queue)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
                   
                   {(!allSigned || !hasActPhoto) && (
-                    <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px', fontWeight: 'bold' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
                       ⚠️ Завоз доступен после подписи акта всеми мастерами И загрузки фото Акта ВУ-22.
                     </div>
                   )}
@@ -1369,12 +1393,12 @@ export default function App() {
               <>
                 {selectedMetrics && (
                   <div className="premium-card">
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⏱️ Анализ времени простоя</h4>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>⏱️ Анализ времени простоя</h4>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
                       <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
-                      <div>Общий ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--danger)' }}>{selectedMetrics.paused_hours} ч</b></div>
+                      <div>Общий ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--status-paused)' }}>{selectedMetrics.paused_hours} ч</b></div>
                     </div>
-                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-light)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт:</span><b style={{ color: 'var(--success)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
+                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-subtle)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт:</span><b style={{ color: 'var(--status-ready)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
                   </div>
                 )}
                 
@@ -1382,21 +1406,21 @@ export default function App() {
                   <div className="premium-card">
                     <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия:</h4>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {visibleTransitions.map((st: string) => <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto', background: st === CASE_STATUS.PAUSED ? 'var(--danger)' : 'var(--brand-color)' }}>{st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}</button>)}
+                      {visibleTransitions.map((st: string) => <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto', background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' }}>{st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}</button>)}
                     </div>
                   </div>
                 )}
 
                 <div className="premium-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand)' }}>📄 Документы и Акты</h4></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
                     {documents.map((d: any) => (
-                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
+                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
                         <span>
                           <b>{d.doc_type}</b> №{d.doc_number}
-                          {d.file_url && <a href={d.file_url} target="_blank" rel="noreferrer" style={{ marginLeft: '6px', color: 'var(--brand-color)', textDecoration: 'none' }}>[🖼️ Скан]</a>}
+                          {d.file_url && <a href={d.file_url} target="_blank" rel="noreferrer" style={{ marginLeft: '6px', color: 'var(--brand)', textDecoration: 'none' }}>[🖼️ Скан]</a>}
                         </span>
-                        <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{d.doc_date || ''}</span>
                       </div>
                     ))}
                   </div>
@@ -1410,13 +1434,13 @@ export default function App() {
                 </div>
                 
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-muted)' }}>📜 Журнал событий</h4>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>📜 Журнал событий</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {statusHistory.map((ev: any) => (
-                      <div key={ev.event_id || ev.event_datetime} style={{ fontSize: '10px', padding: '6px', background: 'var(--bg-color)', borderRadius: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}><span>{STATUS_RU[ev.new_status] || ev.new_status}</span><span style={{ color: 'var(--brand-color)', fontWeight: 'normal' }}>👤 {ev.users?.name || 'Система'}</span></div>
-                        <div style={{ color: 'var(--text-muted)', fontSize: '9px', marginTop: '2px' }}>{new Date(ev.event_datetime).toLocaleString()}</div>
-                        {ev.comment && <div style={{ fontStyle: 'italic', marginTop: '2px', color: 'var(--text-main)' }}>{ev.comment}</div>}
+                      <div key={ev.event_id || ev.event_datetime} style={{ fontSize: '10px', padding: '6px', background: 'var(--bg-main)', borderRadius: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}><span>{STATUS_RU[ev.new_status] || ev.new_status}</span><span style={{ color: 'var(--brand)', fontWeight: 'normal' }}>👤 {ev.users?.name || 'Система'}</span></div>
+                        <div style={{ color: 'var(--text-secondary)', fontSize: '9px', marginTop: '2px' }}>{new Date(ev.event_datetime).toLocaleString()}</div>
+                        {ev.comment && <div style={{ fontStyle: 'italic', marginTop: '2px', color: 'var(--text-primary)' }}>{ev.comment}</div>}
                       </div>
                     ))}
                   </div>
@@ -1427,7 +1451,7 @@ export default function App() {
             {activeRole === 'ADMIN' && (
               <button 
                 className="btn-primary" 
-                style={{ background: 'var(--danger)', marginTop: '12px', width: '100%' }} 
+                style={{ background: 'var(--status-paused)', marginTop: '12px', width: '100%' }} 
                 onClick={handleDeleteCase} 
                 disabled={loading}
               >
@@ -1442,7 +1466,7 @@ export default function App() {
       {showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', color: 'var(--danger)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
+            <h3 style={{ margin: '0 0 10px 0', color: 'var(--status-paused)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
             
             <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
               <option value="PRIMARY">Основная задержка</option>
@@ -1462,7 +1486,7 @@ export default function App() {
             <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Следующее действие" />
             <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
 
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--danger)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--status-paused)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
           </div>
         </div>
       )}
