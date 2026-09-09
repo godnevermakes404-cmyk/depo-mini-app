@@ -150,7 +150,6 @@ export default function App() {
 
   const [arrivalCount, setArrivalCount] = useState<number>(1);
   const [editingWagonNum, setEditingWagonNum] = useState<string>('');
-  const [ownerType, setOwnerType] = useState('Own');
 
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
@@ -611,7 +610,7 @@ export default function App() {
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
 
-  // 🎯 РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
+  // РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator';
 
