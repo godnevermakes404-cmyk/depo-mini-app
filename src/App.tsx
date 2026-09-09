@@ -148,8 +148,10 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  const [wagonNumbersInput, setWagonNumbersInput] = useState('');
-  const [ownerType, setOwnerType] = useState('Own');
+  // 🎯 КПП ВВОДИТ ТОЛЬКО КОЛИЧЕСТВО ВАГОНОВ
+  const [arrivalCount, setArrivalCount] = useState<number>(1);
+  const [editingWagonNum, setEditingWagonNum] = useState<string>('');
+
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
 
@@ -336,6 +338,8 @@ export default function App() {
 
   async function openCaseDetails(item: RepairCase) {
     vibrate('light'); setSelectedCase(item);
+    setEditingWagonNum(item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '' : item.wagons?.wagon_number || '');
+
     const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
     if (timeMetrics) {
       const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
@@ -352,38 +356,51 @@ export default function App() {
     setDocuments(docs || []);
   }
 
-  // 🎯 ВАЛИДАЦИЯ НОМЕРА ВАГОНА: СТРОГО 8 ЦИФР
-  async function handleCreateRepair() {
+  // 🎯 КПП ВВОДИТ ТОЛЬКО КОЛИЧЕСТВО ВАГОНОВ
+  async function handleKppArrival() {
     if (isGuest) return;
-    
-    // Фильтруем введенные данные по строгому шаблону: ровно 8 цифр
-    const numbers = wagonNumbersInput
-      .split(/[\s,]+/)
-      .map(n => n.trim())
-      .filter(n => /^\d{8}$/.test(n));
+    if (arrivalCount <= 0) { alert('Укажите количество вагонов!'); return; }
 
-    if (numbers.length === 0) { 
-      alert('⚠️ Введите корректный 8-значный НОМЕР ВАГОНА (только 8 цифр, без букв)!'); 
-      return; 
+    setLoading(true); vibrate('medium');
+    const { error } = await supabase.rpc('register_kpp_arrival', {
+      p_count: arrivalCount,
+      p_user_id: user?.id || null
+    });
+
+    if (!error) {
+      notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон');
+      alert(`Успешно принято ${arrivalCount} вагонов с КПП! Оператор может внести их реальные номера.`);
+      setShowAddModal(false);
+      setArrivalCount(1);
+      loadData();
+    } else {
+      alert('Ошибка приёма вагонов с КПП: ' + error.message);
+    }
+    setLoading(false);
+  }
+
+  // 🎯 ОПЕРАТОР ПРИСВАИВАЕТ 8-ЗНАЧНЫЙ НОМЕР
+  async function handleSaveWagonNumber() {
+    if (!selectedCase?.wagons?.id || !editingWagonNum.trim()) return;
+    if (!/^\d{8}$/.test(editingWagonNum.trim())) {
+      alert('⚠️ Номер вагона должен состоять ровно из 8 ЦИФР!');
+      return;
     }
 
     setLoading(true); vibrate('medium');
-    let successCount = 0; const addedWagons: string[] = []; let lastDbError = '';
+    const { error } = await supabase.rpc('update_wagon_number', {
+      p_wagon_id: selectedCase.wagons.id,
+      p_new_number: editingWagonNum.trim(),
+      p_user_id: user?.id || null
+    });
 
-    const defaultWagonType = 'Полувагон';
-    const defaultRepairType = 'ДР';
-    const defaultOwner = ownerType === 'Own' ? 'Собственный' : 'Чужой';
-
-    for (const num of numbers) {
-      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: defaultRepairType, p_user_id: user?.id || null, p_wagon_type: defaultWagonType, p_owner: defaultOwner, p_owner_type: ownerType });
-      if (!error) { successCount++; addedWagons.push(num); } else { lastDbError = error.message; }
+    if (!error) {
+      alert('Номер вагона успешно обновлен!');
+      setSelectedCase(null);
+      loadData();
+    } else {
+      alert('Ошибка сохранения номера: ' + error.message);
     }
-    
-    if (successCount > 0) { 
-      if (addedWagons.length === 1) notifyWagonArrived(addedWagons[0], defaultRepairType, defaultOwner, defaultWagonType); 
-      else notifyWagonsArrivedBulk(addedWagons, defaultRepairType, defaultOwner, defaultWagonType);
-      alert(`Успешно принято вагонов: ${successCount} шт.`); setWagonNumbersInput(''); setShowAddModal(false); loadData(); 
-    } else { alert(`Ошибка БД:\n${lastDbError}`); }
     setLoading(false);
   }
 
@@ -401,7 +418,7 @@ export default function App() {
     });
 
     if (!error) {
-      alert(`Вагон №${wagonNum} успешно удален из базы.`);
+      alert(`Вагон успешно удален из базы.`);
       setSelectedCase(null); loadData();
     } else {
       alert('Ошибка удаления вагона: ' + error.message);
@@ -554,6 +571,8 @@ export default function App() {
   const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
   const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
   
+  const unassignedWagonsCount = repairs.filter(r => r.wagons?.wagon_number?.startsWith('БЕЗ_№_')).length;
+
   const getWagonDwellHours = (r: RepairCase) => {
     const start = new Date(r.created_at).getTime();
     const end = r.current_status === CASE_STATUS.READY && r.forecast_release ? new Date(r.forecast_release).getTime() : new Date().getTime();
@@ -588,12 +607,6 @@ export default function App() {
   
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
-
-  // 🎯 РАСПОЗНАВАНИЕ ТОЛЬКО 8 ЦИФР
-  const parsedWagonsCount = wagonNumbersInput
-    .split(/[\s,]+/)
-    .map(n => n.trim())
-    .filter(n => /^\d{8}$/.test(n)).length;
 
   const visibleTransitions = isGuest ? [] : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED));
 
@@ -630,6 +643,23 @@ export default function App() {
                   Вы зашли впервые. Обратитесь к Администратору депо для получения доступа.
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🎯 СИГНАЛ ОПЕРАТОРУ О НЕОФОРМЛЕННЫХ ВАГОНАХ С КПП */}
+        {unassignedWagonsCount > 0 && isAdminOrOperator && (
+          <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }} onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '13px', color: 'var(--status-queue)' }}>
+                  ⚠️ Неоформленные вагоны с КПП: {unassignedWagonsCount} шт.
+                </div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Охрана зафиксировала приход. Нажмите, чтобы присвоить реальные номера вагонов.
+                </div>
+              </div>
+              <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>Внести →</span>
             </div>
           </div>
         )}
@@ -683,7 +713,7 @@ export default function App() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
-                  <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Принять вагон</button>
+                  <button className="btn-primary" onClick={() => setShowAddModal(true)}>🛡️ Приход с КПП</button>
                 )}
                 {!isGuest && canManageWarehouse && (
                   <button className="btn-secondary" onClick={() => openAddItemModal()}>+ Новый товар</button>
@@ -748,7 +778,9 @@ export default function App() {
                           onClick={() => openCaseDetails(item)}
                         >
                           <div>
-                            <div style={{ fontWeight: 'bold', fontSize: '12px' }}>№ {item.wagons?.wagon_number}</div>
+                            <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
+                              № {item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Требует номера' : item.wagons?.wagon_number}
+                            </div>
                             <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</div>
                           </div>
                           <div style={{ textAlign: 'right' }}>
@@ -868,6 +900,7 @@ export default function App() {
               </div>
             ) : (
               filteredRepairs.map((item) => {
+                const isUnassigned = item.wagons?.wagon_number?.startsWith('БЕЗ_№_');
                 const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
                 const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
                 
@@ -880,10 +913,16 @@ export default function App() {
                     key={item.repair_id} 
                     className="premium-card" 
                     onClick={() => openCaseDetails(item)} 
-                    style={{ cursor: 'pointer', borderLeft: isBreached ? '4px solid var(--status-paused)' : 'none' }}
+                    style={{ 
+                      cursor: 'pointer', 
+                      borderLeft: isUnassigned ? '4px solid var(--status-queue)' : isBreached ? '4px solid var(--status-paused)' : 'none',
+                      background: isUnassigned ? 'var(--status-queue-bg)' : 'var(--card-bg)'
+                    }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: '800' }}>№ {item.wagons?.wagon_number}</span>
+                      <span style={{ fontSize: '15px', fontWeight: '800', color: isUnassigned ? 'var(--status-queue)' : 'var(--text-primary)' }}>
+                        {isUnassigned ? '⚠️ Не оформлен (Приход КПП)' : `№ ${item.wagons?.wagon_number}`}
+                      </span>
                       <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
                     </div>
                     
@@ -1105,7 +1144,6 @@ export default function App() {
 
             {user?.role === 'ADMIN' ? (
               <>
-                {/* ПАНЕЛЬ СИМУЛЯЦИИ РОЛЕЙ ДЛЯ ТЕСТИРОВАНИЯ */}
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
                   <select className="select-field" style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} value={activeRole} onChange={e => handleRoleChange(e.target.value)}>
@@ -1114,7 +1152,6 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ С ИСПОЛЬЗОВАНИЕМ RPC */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1309,23 +1346,30 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
+      {/* 🎯 Модалка: ПРОСТОЙ ВВОД КОЛИЧЕСТВА НА КПП */}
       {!isGuest && showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
-            <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (только цифры, по 1 на строку или через пробел)" rows={3} />
-            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand)' : 'var(--text-secondary)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов (8 цифр): {parsedWagonsCount} шт.</div>
-            
-            <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
-              <option value="Own">Собственный</option>
-              <option value="Third-party">Чужой</option>
-            </select>
+            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>🛡️ КПП: Приемка состава</h3>
+            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 10px 0' }}>
+              Укажите количество прибывших вагонов. Номера вагонов сможет позже занести Оператор/Диспетчер.
+            </p>
 
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Количество вагонов:</label>
+            <input 
+              className="input-field" 
+              style={{ marginTop: '4px', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }} 
+              type="number" 
+              min={1} 
+              max={100} 
+              value={arrivalCount} 
+              onChange={e => setArrivalCount(Math.max(1, Number(e.target.value) || 1))} 
+            />
+
+            <div style={{ display: 'flex', gap: '6px', marginTop: '16px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleCreateRepair} disabled={loading || parsedWagonsCount === 0}>
-                Зарегистрировать {parsedWagonsCount > 0 ? `(${parsedWagonsCount})` : ''}
+              <button className="btn-primary" onClick={handleKppArrival} disabled={loading}>
+                Зарегистрировать ({arrivalCount} ваг.)
               </button>
             </div>
           </div>
@@ -1339,11 +1383,36 @@ export default function App() {
             <div className="sheet-handle"></div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: '18px' }}>№ {selectedCase.wagons?.wagon_number}</h3>
+                <h3 style={{ margin: 0, fontSize: '18px' }}>
+                  {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Вагон без номера' : `№ ${selectedCase.wagons?.wagon_number}`}
+                </h3>
                 <span className="status-pill">{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
               </div>
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
+
+            {/* 🎯 БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА */}
+            {isAdminOrOperator && (
+              <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
+                  {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '✏️ Присвоить реальный 8-значный номер вагона:' : '✏️ Изменить номер вагона:'}
+                </div>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input 
+                    className="input-field" 
+                    style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', background: '#ffffff' }} 
+                    type="text" 
+                    maxLength={8} 
+                    placeholder="Например: 51234567" 
+                    value={editingWagonNum} 
+                    onChange={e => setEditingWagonNum(e.target.value.replace(/\D/g, ''))} 
+                  />
+                  <button className="btn-primary" style={{ width: 'auto', padding: '0 12px', fontSize: '11px' }} onClick={handleSaveWagonNumber} disabled={loading || editingWagonNum.length !== 8}>
+                    💾 Сохранить
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="premium-card">
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
