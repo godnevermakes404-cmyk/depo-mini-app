@@ -48,30 +48,41 @@ interface ShopMasterConfig { label: string; master: string; tg: string; role: st
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
+
+// 🎯 ОБНОВЛЕННЫЙ ПОЛНЫЙ СПИСОК ЦЕХОВ ДЕПО
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
-  { key: 'wheels', label: 'Колёсный цех' },
-  { key: 'brakes', label: 'Автотормозной цех' },
+  { key: 'wheels', label: '18 цех (Колёсный)' },
+  { key: 'brakes', label: '23 цех (АКП / Автотормозной)' },
   { key: 'body', label: 'Кузовной / Сварочный' },
-  { key: 'cooling', label: 'Холодильный цех' }
+  { key: 'cooling', label: '12 цех (Холодильный)' },
+  { key: 'electric', label: '6 цех (Электрооборудование)' },
+  { key: 'prep', label: '17 цех (Ремонтно-заготовительный)' },
+  { key: 'mech_equip', label: '9 цех (Мехоборудование)' }
 ];
+
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
 
+// 🎯 ОБНОВЛЕННЫЕ РОЛИ И СОТРУДНИКИ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
-  { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
+  { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
-  { key: 'procurement', label: '📦 Отдел снабжения / Закупки (Материалы)' },
-  { key: 'mechanic', label: '🛠 Начальник цеха (отвечает за ремонт и за остальные цеха)' },
-  { key: 'otk', label: '🔍 Инспектор ОТК (Контроль качества)' },
+  { key: 'procurement', label: '📦 Снабжение — Рустамжон' },
+  { key: 'mechanic', label: '🛠 Нач. цехов — Абдурахмонжон' },
+  { key: 'deputy', label: '👔 Зам. нач. ремонтного цеха' },
+  { key: 'otk', label: '🔍 ОТК — Дилявер' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
-  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
-  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
+  { key: 'wheels', label: '⚙️ Мастер 18 цеха (Колёсный) — Сирожиддин' },
+  { key: 'brakes', label: '🛑 Мастер 23 цеха (АКП) — Юсупов' },
   { key: 'body', label: '🔨 Мастер Кузовного цеха' },
-  { key: 'cooling', label: '❄️ Мастер Холодильного цеха' },
+  { key: 'cooling', label: '❄️ Мастер 12 цеха (Холодильный) — Алишер' },
+  { key: 'electric', label: '⚡ Мастер 6 цеха (Электро) — Айдер' },
+  { key: 'prep', label: '📐 Мастер 17 цеха (Заготовительный) — Ровшан' },
+  { key: 'mech_equip', label: '⛓️ Мастер 9 цеха (Мехоборудование) — Шоюнус' },
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
@@ -94,7 +105,7 @@ export default function App() {
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState('Холодильный цех');
+  const [itemCategory, setItemCategory] = useState('12 цех (Холодильный)');
   const [itemQty, setItemQty] = useState('10');
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
@@ -103,15 +114,20 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
+  // 🎯 ВНЕCЕНЫ ТОЧНЫЕ ФИО И TELEGRAM HANDLES
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
-    mechanic: { label: 'Начальник цеха (отвечает за ремонт и за остальные цеха)', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
-    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Инспектор ОТК', tg: '@depo_otk', role: 'OTK', targetHours: 1 },
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Рустамжон', tg: '@Rustamjon_5171', role: 'SUPPLY', targetHours: 0 },
+    mechanic: { label: 'Начальник цехов', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
+    deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Зам. начальника', tg: '@Smets_1964', role: 'DEPUTY', targetHours: 0 },
+    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Дилявер', tg: '@Dilyawer282', role: 'OTK', targetHours: 1 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
-    wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
-    brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
-    body: { label: 'Кузовной / Сварочный', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
-    cooling: { label: 'Холодильный цех', master: 'Морозов М.М.', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
+    wheels: { label: '18 цех (Колёсный)', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
+    brakes: { label: '23 цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
+    body: { label: 'Кузовной / Сварочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
+    cooling: { label: '12 цех (Холодильный)', master: 'Алишер', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
+    electric: { label: '6 цех (Электрооборудование)', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
+    prep: { label: '17 цех (Ремонтно-заготовительный)', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
+    mech_equip: { label: '9 цех (Механическое оборудование)', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
     docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
   });
 
@@ -240,7 +256,7 @@ export default function App() {
     } else {
       setEditingItem(null);
       setItemName('');
-      setItemCategory('Холодильный цех');
+      setItemCategory('12 цех (Холодильный)');
       setItemQty('10');
       setItemUnit('шт');
       setItemMinLimit('5');
@@ -289,7 +305,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 🔒 УДАЛЕНИЕ ВАГОНА ИЗ БАЗЫ (ТОЛЬКО АДМИН)
   async function handleDeleteCase() {
     if (activeRole !== 'ADMIN' || !selectedCase) return;
     const wagonNum = selectedCase.wagons?.wagon_number || '';
@@ -496,7 +511,7 @@ export default function App() {
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
             </div>
             <div className="premium-card">
@@ -666,10 +681,13 @@ export default function App() {
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
               >
                 <option value="">Все цеха и категории</option>
-                <option value="Холодильный цех">❄️ Холодильный цех</option>
-                <option value="Колёсный цех">⚙️ Колёсный цех</option>
+                <option value="12 цех (Холодильный)">❄️ 12 цех (Холодильный)</option>
+                <option value="18 цех (Колёсный)">⚙️ 18 цех (Колёсный)</option>
+                <option value="23 цех (АКП)">🛑 23 цех (АКП)</option>
+                <option value="6 цех (Электрооборудование)">⚡ 6 цех (Электро)</option>
+                <option value="17 цех (Ремонтно-заготовительный)">📐 17 цех (Заготовительный)</option>
+                <option value="9 цех (Механическое оборудование)">⛓️ 9 цех (Мехоборудование)</option>
                 <option value="Тележечный цех">🔧 Тележечный цех</option>
-                <option value="Автотормозной цех">🛑 Автотормозной цех</option>
                 <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
               </select>
             </div>
@@ -816,7 +834,7 @@ export default function App() {
                         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} type="text" value={val.master} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} placeholder="ФИО" />
                           <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} type="text" value={val.tg} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} placeholder="@username" />
-                          {key !== 'procurement' && key !== 'mechanic' && (
+                          {key !== 'procurement' && key !== 'mechanic' && key !== 'deputy' && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
                               <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
                               <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>ч.</span>
@@ -850,10 +868,13 @@ export default function App() {
             <input className="input-field" type="text" placeholder="Наименование детали / материала" value={itemName} onChange={e => setItemName(e.target.value)} />
             
             <select className="select-field" value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
-              <option value="Холодильный цех">❄️ Холодильный цех</option>
-              <option value="Колёсный цех">⚙️ Колёсный цех</option>
+              <option value="12 цех (Холодильный)">❄️ 12 цех (Холодильный)</option>
+              <option value="18 цех (Колёсный)">⚙️ 18 цех (Колёсный)</option>
+              <option value="23 цех (АКП)">🛑 23 цех (АКП)</option>
+              <option value="6 цех (Электрооборудование)">⚡ 6 цех (Электро)</option>
+              <option value="17 цех (Ремонтно-заготовительный)">📐 17 цех (Заготовительный)</option>
+              <option value="9 цех (Механическое оборудование)">⛓️ 9 цех (Мехоборудование)</option>
               <option value="Тележечный цех">🔧 Тележечный цех</option>
-              <option value="Автотормозной цех">🛑 Автотормозной цех</option>
               <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
             </select>
 
@@ -1095,7 +1116,6 @@ export default function App() {
               </>
             )}
 
-            {/* 🎯 КНОПКА УДАЛЕНИЯ ВАГОНА ДЛЯ АДМИНА */}
             {activeRole === 'ADMIN' && (
               <button 
                 className="btn-primary" 
