@@ -48,8 +48,6 @@ interface ShopMasterConfig { label: string; master: string; tg: string; role: st
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
-
-// 🎯 ОБНОВЛЕННЫЙ ПОЛНЫЙ СПИСОК ЦЕХОВ ДЕПО
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: '18 цех (Колёсный)' },
@@ -60,13 +58,11 @@ const DEFAULT_SHOPS = [
   { key: 'prep', label: '17 цех (Ремонтно-заготовительный)' },
   { key: 'mech_equip', label: '9 цех (Мехоборудование)' }
 ];
-
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
 
-// 🎯 ОБНОВЛЕННЫЕ РОЛИ И СОТРУДНИКИ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
@@ -114,9 +110,8 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  // 🎯 ВНЕCЕНЫ ТОЧНЫЕ ФИО И TELEGRAM HANDLES
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Рустамжон', tg: '@Rustamjon_5171', role: 'SUPPLY', targetHours: 0 },
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цехов', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
     deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Зам. начальника', tg: '@Smets_1964', role: 'DEPUTY', targetHours: 0 },
     otk: { label: 'ОТК (Отдел технического контроля)', master: 'Дилявер', tg: '@Dilyawer282', role: 'OTK', targetHours: 1 },
@@ -207,6 +202,7 @@ export default function App() {
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
   const canManageWarehouse = activeRole === 'ADMIN' || activeRole === 'procurement';
+  const isAdminOrDocs = activeRole === 'ADMIN' || activeRole === 'docs';
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
@@ -328,6 +324,51 @@ export default function App() {
     setLoading(false);
   }
 
+  // 📷 ФУНКЦИЯ ЗАГРУЗКИ ФОТО АКТА ВУ-22 ИЗ ГАЛЕРЕИ ИЛИ КАМЕРЫ
+  async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !selectedCase) return;
+    if (!isAdminOrDocs) {
+      alert('⛔ Загружать фото акта может только Оформитель актов или Админ!');
+      return;
+    }
+    setLoading(true); vibrate('medium');
+
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileName = `${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
+    const filePath = `vu22/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('act_photos')
+      .upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      alert('Ошибка загрузки фото в хранилище: ' + uploadError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
+    const publicUrl = urlData.publicUrl;
+
+    const { error: rpcError } = await supabase.rpc('add_document', {
+      p_repair_id: selectedCase.repair_id,
+      p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
+      p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number}`,
+      p_user_id: user?.id,
+      p_file_url: publicUrl
+    });
+
+    if (!rpcError) {
+      alert('📷 Фото акта ВУ-22 успешно загружено!');
+      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
+      setDocuments(docs || []);
+    } else {
+      alert('Ошибка сохранения документа: ' + rpcError.message);
+    }
+    setLoading(false);
+  }
+
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
@@ -352,14 +393,15 @@ export default function App() {
     setLoading(true);
     const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id });
     if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
+    else { alert('Ошибка завоза на путь: ' + error.message); }
     setLoading(false);
   }
 
   async function handleAddDocument() {
-    if (activeRole !== 'ADMIN' && activeRole !== 'docs') return;
+    if (!isAdminOrDocs) return;
     if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
-    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id });
+    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id, p_file_url: null });
     if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
@@ -470,10 +512,14 @@ export default function App() {
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+  
+  // 🎯 ПРОВЕРКА НАЛИЧИЯ ФОТО АКТА ВУ-22
+  const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
+  const hasActPhoto = Boolean(actPhotoDoc);
+
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
   const isAdminOrOperator = activeRole === 'ADMIN' || activeRole === 'operator';
-  const isAdminOrDocs = activeRole === 'ADMIN' || activeRole === 'docs';
   const visibleTransitions = isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
@@ -511,7 +557,7 @@ export default function App() {
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
             </div>
             <div className="premium-card">
@@ -1026,6 +1072,32 @@ export default function App() {
               <>
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
+                  
+                  {/* 🎯 БЛОК ЗАГРУЗКИ И СТАТУСА ФОТО АКТА ВУ-22 */}
+                  <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }}>📸 Фото / Скан Акта ВУ-22:</div>
+                      <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--success)' : 'var(--danger)', marginTop: '2px' }}>
+                        {hasActPhoto ? '✓ Файл прикреплен и верифицирован' : '❌ Файл не прикреплен (завоз заблокирован)'}
+                      </div>
+                    </div>
+
+                    {isAdminOrDocs && (
+                      <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
+                        {hasActPhoto ? '📷 Заменить' : '📷 Загрузить фото'}
+                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
+                      </label>
+                    )}
+                  </div>
+
+                  {hasActPhoto && actPhotoDoc?.file_url && (
+                    <div style={{ marginBottom: '8px', textAlign: 'right' }}>
+                      <a href={actPhotoDoc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand-color)', textDecoration: 'none', fontWeight: 'bold' }}>
+                        🔍 Открыть прикрепленное фото акта
+                      </a>
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {DEFAULT_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
@@ -1047,7 +1119,12 @@ export default function App() {
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
                   {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--success)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--warning)', marginBottom: '8px', background: 'var(--bg-color)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
-                  {!allSigned && <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px' }}>⚠️ Завоз доступен после подписи акта всеми мастерами.</div>}
+                  
+                  {(!allSigned || !hasActPhoto) && (
+                    <div style={{ fontSize: '11px', color: 'var(--danger)', marginBottom: '8px', fontWeight: 'bold' }}>
+                      ⚠️ Завоз доступен после подписи акта всеми мастерами И загрузки фото Акта ВУ-22.
+                    </div>
+                  )}
                   
                   {isAdminOrOperator && (
                     <>
@@ -1056,8 +1133,8 @@ export default function App() {
                         <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned}>⏳ В очередь</button>
-                        <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned}>➡️ Завезти на путь</button>
+                        <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || !hasActPhoto}>⏳ В очередь</button>
+                        <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || !hasActPhoto}>➡️ Завезти на путь</button>
                       </div>
                     </>
                   )}
@@ -1089,7 +1166,13 @@ export default function App() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand-color)' }}>📄 Документы и Акты</h4></div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
                     {documents.map((d: any) => (
-                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}><span><b>{d.doc_type}</b> №{d.doc_number}</span><span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span></div>
+                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
+                        <span>
+                          <b>{d.doc_type}</b> №{d.doc_number}
+                          {d.file_url && <a href={d.file_url} target="_blank" rel="noreferrer" style={{ marginLeft: '6px', color: 'var(--brand-color)', textDecoration: 'none' }}>[🖼️ Скан]</a>}
+                        </span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{d.doc_date || ''}</span>
+                      </div>
                     ))}
                   </div>
                   {isAdminOrDocs && (
