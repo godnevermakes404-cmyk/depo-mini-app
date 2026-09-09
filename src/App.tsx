@@ -243,7 +243,7 @@ export default function App() {
     setLoading(true); vibrate('heavy');
     for (const [key, val] of Object.entries(shopMasters)) {
       const { error } = await supabase.rpc('update_shop_master', {
-        p_shop_key: key, p_shop_name: val.label, p_master_name: val.master, p_tg: val.tg, p_role_code: val.role, p_target_hours: val.targetHours, p_user_id: user?.id
+        p_shop_key: key, p_shop_name: val.label, p_master_name: val.master, p_tg: val.tg, p_role_code: val.role, p_target_hours: val.targetHours, p_user_id: user?.id || null
       });
       if (error) { alert(`Ошибка сохранения ${val.label}: ` + error.message); }
     }
@@ -264,7 +264,7 @@ export default function App() {
     const { error } = await supabase.rpc('add_warehouse_stock', {
       p_id: adjustingItem.id,
       p_delta: finalDelta,
-      p_user_id: user?.id
+      p_user_id: user?.id || null
     });
 
     if (!error) {
@@ -294,7 +294,7 @@ export default function App() {
       p_quantity: Number(itemQty) || 0,
       p_unit: itemUnit,
       p_min_limit: Number(itemMinLimit) || 0,
-      p_user_id: user?.id
+      p_user_id: user?.id || null
     });
 
     if (!error) {
@@ -356,7 +356,7 @@ export default function App() {
     const defaultOwner = ownerType === 'Own' ? 'Собственный' : 'Чужой';
 
     for (const num of numbers) {
-      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: defaultRepairType, p_user_id: user?.id, p_wagon_type: defaultWagonType, p_owner: defaultOwner, p_owner_type: ownerType });
+      const { error } = await supabase.rpc('create_repair_case', { p_wagon_number: num, p_repair_type: defaultRepairType, p_user_id: user?.id || null, p_wagon_type: defaultWagonType, p_owner: defaultOwner, p_owner_type: ownerType });
       if (!error) { successCount++; addedWagons.push(num); } else { lastDbError = error.message; }
     }
     
@@ -378,7 +378,7 @@ export default function App() {
     setLoading(true); vibrate('heavy');
     const { error } = await supabase.rpc('delete_repair_case', {
       p_repair_id: selectedCase.repair_id,
-      p_user_id: user?.id
+      p_user_id: user?.id || null
     });
 
     if (!error) {
@@ -421,7 +421,7 @@ export default function App() {
       p_repair_id: selectedCase.repair_id,
       p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
       p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number}`,
-      p_user_id: user?.id,
+      p_user_id: user?.id || null,
       p_file_url: publicUrl
     });
 
@@ -435,7 +435,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 🎯 ОБНОВЛЕННАЯ ФУНКЦИЯ ПОДПИСИ С ВЫВОДОМ ОШИБКИ ИЗ БД
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
@@ -445,7 +444,7 @@ export default function App() {
       p_repair_id: selectedCase.repair_id, 
       p_shop_key: shopKey, 
       p_user_name: signLabel, 
-      p_user_id: user?.id 
+      p_user_id: user?.id || null 
     });
 
     if (!error) { 
@@ -462,7 +461,7 @@ export default function App() {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
     const masterLabel = getMasterLabel(shopKey);
-    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: user?.id });
+    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: user?.id || null });
     if (!error) { notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey }); loadData(); }
     setLoading(false);
   }
@@ -471,7 +470,7 @@ export default function App() {
     if (activeRole !== 'ADMIN' && activeRole !== 'operator') return; 
     if (!selectedCase) return;
     setLoading(true);
-    const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id });
+    const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id || null });
     if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
     else { alert('Ошибка завоза на путь: ' + error.message); }
     setLoading(false);
@@ -481,7 +480,7 @@ export default function App() {
     if (!isAdminOrDocs) return;
     if (!docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
-    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id, p_file_url: null });
+    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id || null, p_file_url: null });
     if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
@@ -496,7 +495,7 @@ export default function App() {
       setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_user_id: user?.id, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
+    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_user_id: user?.id || null, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
     if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
@@ -505,7 +504,7 @@ export default function App() {
   async function handleConfirmDelay() {
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
     setLoading(true); vibrate('heavy');
-    const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id });
+    const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id || null });
     if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); }
     else { alert('Ошибка задержки: ' + error.message); }
     setLoading(false);
@@ -1292,7 +1291,7 @@ export default function App() {
                     onChange={async (e) => {
                       const newType = e.target.value;
                       setLoading(true);
-                      const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: user?.id });
+                      const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: user?.id || null });
                       if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
                       else { alert('Ошибка смены вида ремонта: ' + error.message); }
                       setLoading(false);
@@ -1319,7 +1318,7 @@ export default function App() {
                       await supabase.rpc('update_wagon_owner', { 
                         p_wagon_id: selectedCase.wagons.id, 
                         p_owner: e.target.value, 
-                        p_user_id: user?.id 
+                        p_user_id: user?.id || null 
                       });
                       loadData();
                     }}
