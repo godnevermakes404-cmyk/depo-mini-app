@@ -150,6 +150,7 @@ export default function App() {
 
   const [arrivalCount, setArrivalCount] = useState<number>(1);
   const [editingWagonNum, setEditingWagonNum] = useState<string>('');
+  const [ownerType, setOwnerType] = useState('Own');
 
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
@@ -603,14 +604,22 @@ export default function App() {
   const avgHoursPerWagon = activeRepairs.length > 0 ? Math.round(totalDwellHours / activeRepairs.length) : 0;
   const avgDaysPerWagon = (avgHoursPerWagon / 24).toFixed(1);
 
-  const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status] || []) : [];
+  const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
 
-  const visibleTransitions = isGuest ? [] : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED));
+  // 🎯 РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
+  const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
+  const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator';
+
+  const visibleTransitions = isGuest ? [] : (
+    isPausedState 
+      ? (canResumeFromPause ? availableTransitions : [])
+      : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED))
+  );
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
