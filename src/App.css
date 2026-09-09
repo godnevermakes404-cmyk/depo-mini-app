@@ -377,3 +377,9 @@ body {
   max-width: 100% !important;
   box-sizing: border-box !important;
 }
+.select-field {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  z-index: 10;
+}

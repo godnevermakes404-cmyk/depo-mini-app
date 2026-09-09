@@ -868,6 +868,8 @@ export default function App() {
               <div className="filters-grid">
                 <select 
                   className="select-field" 
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
                   value={statusFilter || ''} 
                   onChange={e => setStatusFilter(e.target.value || null)}
                 >
@@ -880,6 +882,8 @@ export default function App() {
 
                 <select 
                   className="select-field" 
+                  onTouchStart={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
                   value={repairTypeFilter || ''} 
                   onChange={e => setRepairTypeFilter(e.target.value || null)}
                 >
@@ -893,6 +897,8 @@ export default function App() {
 
               <select 
                 className="select-field" 
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
                 value={delayCategoryFilter || ''} 
                 onChange={e => setDelayCategoryFilter(e.target.value || null)}
               >
@@ -987,6 +993,8 @@ export default function App() {
 
               <select 
                 className="select-field" 
+                onTouchStart={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
                 value={warehouseCatFilter || ''} 
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
               >
@@ -1156,7 +1164,14 @@ export default function App() {
               <>
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
-                  <select className="select-field" style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} value={activeRole} onChange={e => handleRoleChange(e.target.value)}>
+                  <select 
+                    className="select-field" 
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
+                    value={activeRole} 
+                    onChange={e => handleRoleChange(e.target.value)}
+                  >
                     <option value="GUEST">⏳ Гость (Без доступа)</option>
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
@@ -1173,6 +1188,8 @@ export default function App() {
                         </div>
                         <select
                           className="select-field"
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
                           style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
                           value={u.role || 'GUEST'}
                           onChange={async (e) => {
@@ -1321,7 +1338,14 @@ export default function App() {
             <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
             
             <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Цех / Категория:</label>
-            <select className="select-field" style={{ marginTop: '2px' }} value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
+            <select 
+              className="select-field" 
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{ marginTop: '2px' }} 
+              value={itemCategory} 
+              onChange={e => setItemCategory(e.target.value)}
+            >
               <option value="Холодильный цех">❄️ Холодильный цех</option>
               <option value="Колёсный цех">⚙️ Колёсный цех</option>
               <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
@@ -1434,6 +1458,8 @@ export default function App() {
                   <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
                   <select 
                     className="select-field" 
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     value={selectedCase.repair_type || 'ДР'} 
                     disabled={!isAdminOrOperator || loading}
@@ -1575,8 +1601,30 @@ export default function App() {
                   {isAdminOrOperator && (
                     <>
                       <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                        <select className="select-field" style={{ margin: 0 }} value={track} onChange={e => setTrack(e.target.value)}><option value="Путь 1">Путь №1</option><option value="Путь 2">Путь №2</option></select>
-                        <select className="select-field" style={{ margin: 0 }} value={position} onChange={e => setPosition(e.target.value)}><option value="Позиция 1">Позиция 1</option><option value="Позиция 2">Позиция 2</option><option value="Позиция 3">Позиция 3</option></select>
+                        <select 
+                          className="select-field" 
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ margin: 0 }} 
+                          value={track} 
+                          onChange={e => setTrack(e.target.value)}
+                        >
+                          <option value="Путь 1">Путь №1</option>
+                          <option value="Путь 2">Путь №2</option>
+                        </select>
+
+                        <select 
+                          className="select-field" 
+                          onTouchStart={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ margin: 0 }} 
+                          value={position} 
+                          onChange={e => setPosition(e.target.value)}
+                        >
+                          <option value="Позиция 1">Позиция 1</option>
+                          <option value="Позиция 2">Позиция 2</option>
+                          <option value="Позиция 3">Позиция 3</option>
+                        </select>
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
                         <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || !hasActPhoto}>⏳ В очередь</button>
@@ -1623,7 +1671,16 @@ export default function App() {
                   </div>
                   {isAdminOrDocs && (
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <select className="select-field" style={{ margin: 0, flex: 1.2 }} value={docType} onChange={e => setDocType(e.target.value)}>{DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}</select>
+                      <select 
+                        className="select-field" 
+                        onTouchStart={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ margin: 0, flex: 1.2 }} 
+                        value={docType} 
+                        onChange={e => setDocType(e.target.value)}
+                      >
+                        {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                      </select>
                       <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
                       <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
                     </div>
@@ -1665,18 +1722,33 @@ export default function App() {
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--status-paused)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
             
-            <select className="select-field" value={delayType} onChange={e => setDelayType(e.target.value as any)}>
+            <select 
+              className="select-field" 
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              value={delayType} 
+              onChange={e => setDelayType(e.target.value as any)}
+            >
               <option value="PRIMARY">Основная задержка</option>
               <option value="SECONDARY">Сопутствующая задержка</option>
             </select>
             
-            <select className="select-field" value={delayCategory} onChange={e => {
+            <select 
+              className="select-field" 
+              onTouchStart={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              value={delayCategory} 
+              onChange={e => {
                 const cat = e.target.value; setDelayCategory(cat);
                 if (cat === 'Materials') { const info = shopMasters.procurement; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки'); } 
                 else if (cat === 'Equipment') { const info = shopMasters.mechanic; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Начальник цеха'); } 
                 else { setResponsibleParty(''); }
-              }}>
-              <option value="Materials">Материалы / Запчасти</option><option value="Equipment">Поломка оборудования</option><option value="Customer">Заказчик</option><option value="Railway">ЖД</option>
+              }}
+            >
+              <option value="Materials">Материалы / Запчасти</option>
+              <option value="Equipment">Поломка оборудования</option>
+              <option value="Customer">Заказчик</option>
+              <option value="Railway">ЖД</option>
             </select>
             <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
             <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
