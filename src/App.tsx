@@ -161,7 +161,7 @@ export default function App() {
     let tgUser: any = null;
     try {
       const tg = window.Telegram?.WebApp || WebApp;
-      if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_color'); tgUser = tg.initDataUnsafe?.user; }
+      if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_main'); tgUser = tg.initDataUnsafe?.user; }
     } catch (e) {}
 
     if (!tgUser?.id) { setIsOutsideTelegram(true); return; }
@@ -201,6 +201,14 @@ export default function App() {
       setDqViolations(runDataQualityChecks(repairData, delays || []));
     }
   }
+
+  // 🎯 ФУНКЦИЯ ДЛЯ ПРАВИЛЬНОГО ПЕРЕХОДА ВО ВКАДКУ ВАГОНЫ С ПРОКРУТКОЙ НАВЕРХ
+  const goToWagons = (status: string | null) => {
+    vibrate('light');
+    setStatusFilter(status);
+    setCurrentTab('wagons');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
@@ -603,19 +611,19 @@ export default function App() {
 
             {/* 2. BENTO СЕТКА СТАТИСТИКИ */}
             <div className="stats-grid">
-              <div className="stat-box queue" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}>
+              <div className="stat-box queue" onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
                 <span className="stat-label">В очереди</span>
                 <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span>
               </div>
-              <div className="stat-box repair" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}>
+              <div className="stat-box repair" onClick={() => goToWagons(CASE_STATUS.IN_REPAIR)}>
                 <span className="stat-label">В ремонте</span>
                 <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
               </div>
-              <div className="stat-box paused" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>
+              <div className="stat-box paused" onClick={() => goToWagons(CASE_STATUS.PAUSED)}>
                 <span className="stat-label">Задержано</span>
                 <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
               </div>
-              <div className="stat-box ready" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}>
+              <div className="stat-box ready" onClick={() => goToWagons(CASE_STATUS.READY)}>
                 <span className="stat-label">Готовы</span>
                 <span className="stat-value">{readyNotDispatched.length}</span>
               </div>
@@ -650,7 +658,7 @@ export default function App() {
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
                     <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-paused)' }}>🛑 Разбор задержек ({activeDelays.length})</span>
-                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>Все →</span>
+                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => goToWagons(CASE_STATUS.PAUSED)}>Все →</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
@@ -756,7 +764,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 🎯 ОБНОВЛЕННЫЙ ИСПРАВЛЕННЫЙ БЛОК ФИЛЬТРОВ И ПОИСКА */}
             <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <div className="search-wrapper">
                 <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
