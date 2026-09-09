@@ -178,22 +178,23 @@ export default function App() {
 
     setIsOutsideTelegram(false);
 
-    const effectiveTgId = tgUser?.id ? String(tgUser.id) : 'desktop_admin';
-    const effectiveName = tgUser 
-      ? `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() 
-      : 'Владимир (Десктоп)';
+    // Если Telegram ID передан — ищем по нему, иначе ищем админа Владимир
+    let dbUser = null;
+    if (tgUser?.id) {
+      const { data } = await supabase.from('users').select('*').eq('telegram_id', String(tgUser.id)).maybeSingle();
+      dbUser = data;
+    }
 
-    const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', effectiveTgId).maybeSingle();
+    if (!dbUser) {
+      const { data } = await supabase.from('users').select('*').eq('role', 'ADMIN').limit(1).maybeSingle();
+      dbUser = data;
+    }
+
     if (dbUser) {
       setUser(dbUser); 
       setActiveRole(dbUser.role || 'ADMIN');
     } else {
-      const { data: newUser } = await supabase
-        .from('users')
-        .insert([{ telegram_id: effectiveTgId, name: effectiveName, role: 'ADMIN' }])
-        .select()
-        .single();
-      setUser(newUser); 
+      setUser({ id: 'fallback', name: 'Владимир', role: 'ADMIN' });
       setActiveRole('ADMIN');
     }
     loadData();
