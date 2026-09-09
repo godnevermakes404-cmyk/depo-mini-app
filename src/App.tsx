@@ -1099,7 +1099,7 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* 🎯 ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ (БЕЗ ВЫЛЕЗАЮЩИХ СЕЛЕКТОВ) */}
+                {/* 🎯 БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ С ИСПОЛЬЗОВАНИЕМ RPC */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1116,9 +1116,19 @@ export default function App() {
                           onChange={async (e) => {
                             const newRole = e.target.value;
                             setLoading(true);
-                            const { error } = await supabase.from('users').update({ role: newRole }).eq('id', u.id);
+                            vibrate('medium');
+
+                            const { error } = await supabase.rpc('update_user_role', {
+                              p_target_user_id: u.id,
+                              p_new_role: newRole
+                            });
+
                             if (!error) {
                               alert(`Права для ${u.name} изменены на: ${newRole}`);
+                              // Мгновенно обновляем интерфейс
+                              setAllUsersList(prev => prev.map(userItem => 
+                                userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                              ));
                               loadData();
                             } else {
                               alert('Ошибка изменения роли: ' + error.message);
