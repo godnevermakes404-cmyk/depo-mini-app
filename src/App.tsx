@@ -46,6 +46,7 @@ interface DelayLog {
 }
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
+interface UserRecord { id: string; name: string; role: string; telegram_id: string; created_at?: string; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
@@ -84,6 +85,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
   // Фильтры вагонов
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -157,6 +159,7 @@ export default function App() {
 
   useEffect(() => { initAuthAndData(); }, []);
 
+  // 🎯 РЕГИСТРАЦИЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ В СТАТУСЕ GUEST
   async function initAuthAndData() {
     let tg: any = null;
     let tgUser: any = null;
@@ -178,24 +181,41 @@ export default function App() {
 
     setIsOutsideTelegram(false);
 
-    // Если Telegram ID передан — ищем по нему, иначе ищем админа Владимир
-    let dbUser = null;
     if (tgUser?.id) {
-      const { data } = await supabase.from('users').select('*').eq('telegram_id', String(tgUser.id)).maybeSingle();
-      dbUser = data;
-    }
+      const tgIdStr = String(tgUser.id);
+      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
 
-    if (!dbUser) {
-      const { data } = await supabase.from('users').select('*').eq('role', 'ADMIN').limit(1).maybeSingle();
-      dbUser = data;
-    }
+      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
-    if (dbUser) {
-      setUser(dbUser); 
-      setActiveRole(dbUser.role || 'ADMIN');
+      if (dbUser) {
+        setUser(dbUser); 
+        setActiveRole(dbUser.role || 'GUEST');
+      } else {
+        // НОВЫЙ ПОЛЬЗОВАТЕЛЬ -> СОЗДАЕТСЯ КАК GUEST
+        const { data: newUser } = await supabase
+          .from('users')
+          .insert([{ telegram_id: tgIdStr, name: fullName, role: 'GUEST' }])
+          .select()
+          .single();
+
+        if (newUser) {
+          setUser(newUser);
+          setActiveRole('GUEST');
+        } else {
+          setUser({ id: 'guest_temp', name: fullName, role: 'GUEST', telegram_id: tgIdStr });
+          setActiveRole('GUEST');
+        }
+      }
     } else {
-      setUser({ id: 'fallback', name: 'Владимир', role: 'ADMIN' });
-      setActiveRole('ADMIN');
+      // Фолбэк для десктоп приложения если ID опущен
+      const { data: adminUser } = await supabase.from('users').select('*').eq('role', 'ADMIN').limit(1).maybeSingle();
+      if (adminUser) {
+        setUser(adminUser);
+        setActiveRole(adminUser.role || 'ADMIN');
+      } else {
+        setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+        setActiveRole('GUEST');
+      }
     }
     loadData();
   }
@@ -211,7 +231,10 @@ export default function App() {
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
     const { data: whItems } = await supabase.from('warehouse_items').select('*').order('name', { ascending: true });
+    const { data: usersList } = await supabase.from('users').select('*').order('created_at', { ascending: false });
     
+    if (usersList) setAllUsersList(usersList as UserRecord[]);
+
     if (mastersData && mastersData.length > 0) {
       const mapped: Record<string, ShopMasterConfig> = {};
       mastersData.forEach((m: any) => { mapped[m.shop_key] = { label: m.shop_name, master: m.master_name, tg: m.telegram_handle || '@master', role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4) }; });
@@ -234,9 +257,14 @@ export default function App() {
   };
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
-  const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
-  const canManageWarehouse = activeRole === 'ADMIN' || activeRole === 'procurement';
-  const isAdminOrDocs = activeRole === 'ADMIN' || activeRole === 'docs';
+  
+  // ФИЛЬТРЫ ДОСТУПА НА КЛИЕНТЕ
+  const isGuest = activeRole === 'GUEST';
+  const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
+  const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
+  const isAdminOrDocs = !isGuest && (activeRole === 'ADMIN' || activeRole === 'docs');
+  const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
+
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
@@ -252,12 +280,9 @@ export default function App() {
   }
 
   async function handleConfirmStockAdjust() {
-    if (!adjustingItem || !stockDelta.trim()) return;
+    if (isGuest || !adjustingItem || !stockDelta.trim()) return;
     const amount = Number(stockDelta);
-    if (isNaN(amount) || amount <= 0) {
-      alert('Введите корректное количество!');
-      return;
-    }
+    if (isNaN(amount) || amount <= 0) { alert('Введите корректное количество!'); return; }
 
     setLoading(true); vibrate('heavy');
     const finalDelta = adjustMode === 'ADD' ? amount : -amount;
@@ -279,13 +304,12 @@ export default function App() {
   }
 
   const openStockAdjustModal = (item: WarehouseItem, mode: 'ADD' | 'SUBTRACT') => {
-    setAdjustingItem(item);
-    setAdjustMode(mode);
-    setStockDelta('10');
-    setShowStockAdjustModal(true);
+    if (isGuest) return;
+    setAdjustingItem(item); setAdjustMode(mode); setStockDelta('10'); setShowStockAdjustModal(true);
   };
 
   async function handleSaveWarehouseItem() {
+    if (isGuest) return;
     if (!itemName.trim()) { alert('Введите наименование позиции!'); return; }
     setLoading(true); vibrate('medium');
     const { error } = await supabase.rpc('save_warehouse_item', {
@@ -299,10 +323,7 @@ export default function App() {
     });
 
     if (!error) {
-      setShowItemModal(false);
-      setEditingItem(null);
-      setItemName('');
-      loadData();
+      setShowItemModal(false); setEditingItem(null); setItemName(''); loadData();
     } else {
       alert('Ошибка сохранения склада: ' + error.message);
     }
@@ -310,20 +331,11 @@ export default function App() {
   }
 
   const openAddItemModal = (item?: WarehouseItem) => {
+    if (isGuest) return;
     if (item) {
-      setEditingItem(item);
-      setItemName(item.name);
-      setItemCategory(item.category);
-      setItemQty(String(item.quantity));
-      setItemUnit(item.unit);
-      setItemMinLimit(String(item.min_limit));
+      setEditingItem(item); setItemName(item.name); setItemCategory(item.category); setItemQty(String(item.quantity)); setItemUnit(item.unit); setItemMinLimit(String(item.min_limit));
     } else {
-      setEditingItem(null);
-      setItemName('');
-      setItemCategory('Холодильный цех');
-      setItemQty('10');
-      setItemUnit('шт');
-      setItemMinLimit('5');
+      setEditingItem(null); setItemName(''); setItemCategory('Холодильный цех'); setItemQty('10'); setItemUnit('шт'); setItemMinLimit('5');
     }
     setShowItemModal(true);
   };
@@ -347,6 +359,7 @@ export default function App() {
   }
 
   async function handleCreateRepair() {
+    if (isGuest) return;
     const numbers = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8);
     if (numbers.length === 0) { alert('Введите корректные 8-значные номера вагонов!'); return; }
     setLoading(true); vibrate('medium');
@@ -395,19 +408,14 @@ export default function App() {
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !selectedCase) return;
-    if (!isAdminOrDocs) {
-      alert('⛔ Загружать фото акта может только Оформитель актов или Админ!');
-      return;
-    }
+    if (!isAdminOrDocs) { alert('⛔ Загружать фото акта может только Оформитель актов или Админ!'); return; }
     setLoading(true); vibrate('medium');
 
     const fileExt = file.name.split('.').pop() || 'jpg';
     const fileName = `${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
     const filePath = `vu22/${fileName}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from('act_photos')
-      .upload(filePath, file, { upsert: true });
+    const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
 
     if (uploadError) {
       alert('Ошибка загрузки фото в хранилище: ' + uploadError.message);
@@ -468,8 +476,7 @@ export default function App() {
   }
 
   async function handleAssignPosition(toRepair: boolean) {
-    if (activeRole !== 'ADMIN' && activeRole !== 'operator') return; 
-    if (!selectedCase) return;
+    if (!isAdminOrOperator || !selectedCase) return;
     setLoading(true);
     const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: user?.id || null });
     if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
@@ -478,8 +485,7 @@ export default function App() {
   }
 
   async function handleAddDocument() {
-    if (!isAdminOrDocs) return;
-    if (!docNumber.trim() || !selectedCase) return;
+    if (!isAdminOrDocs || !docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
     const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id || null, p_file_url: null });
     if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
@@ -488,7 +494,7 @@ export default function App() {
   }
 
   async function handleUpdateStatus(newStatus: string) {
-    if (!selectedCase) return;
+    if (isGuest || !selectedCase) return;
     if (newStatus === CASE_STATUS.PAUSED) { 
       setDelayCategory('Materials');
       const supplyInfo = shopMasters.procurement;
@@ -503,6 +509,7 @@ export default function App() {
   }
 
   async function handleConfirmDelay() {
+    if (isGuest) return;
     if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
     setLoading(true); vibrate('heavy');
     const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: user?.id || null });
@@ -537,13 +544,7 @@ export default function App() {
     return true;
   });
 
-  const resetAllFilters = () => {
-    setStatusFilter(null);
-    setSearchQuery('');
-    setRepairTypeFilter(null);
-    setDelayCategoryFilter(null);
-  };
-
+  const resetAllFilters = () => { setStatusFilter(null); setSearchQuery(''); setRepairTypeFilter(null); setDelayCategoryFilter(null); };
   const isFilterActive = statusFilter || searchQuery || repairTypeFilter || delayCategoryFilter;
 
   const lostWagonDays = calculateLostWagonDays(delayLogs);
@@ -552,31 +553,20 @@ export default function App() {
   
   const getWagonDwellHours = (r: RepairCase) => {
     const start = new Date(r.created_at).getTime();
-    const end = r.current_status === CASE_STATUS.READY && r.forecast_release 
-      ? new Date(r.forecast_release).getTime() 
-      : new Date().getTime();
+    const end = r.current_status === CASE_STATUS.READY && r.forecast_release ? new Date(r.forecast_release).getTime() : new Date().getTime();
     return Math.max(0, (end - start) / (1000 * 60 * 60));
   };
 
   const getRepairTypeStats = (typeCode: string) => {
     const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
     const hoursList = matchingRepairs.map(getWagonDwellHours);
-    
     if (hoursList.length === 0) return { count: 0, medianHours: 0, medianDays: 0, p90Hours: 0, p90Days: 0 };
-    
     const sorted = [...hoursList].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
     const medianH = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     const p90Idx = Math.floor(sorted.length * 0.9);
     const p90H = sorted[p90Idx] || sorted[sorted.length - 1];
-
-    return {
-      count: matchingRepairs.length,
-      medianHours: Math.round(medianH),
-      medianDays: Number((medianH / 24).toFixed(1)),
-      p90Hours: Math.round(p90H),
-      p90Days: Number((p90H / 24).toFixed(1))
-    };
+    return { count: matchingRepairs.length, medianHours: Math.round(medianH), medianDays: Number((medianH / 24).toFixed(1)), p90Hours: Math.round(p90H), p90Days: Number((p90H / 24).toFixed(1)) };
   };
 
   const drStats = getRepairTypeStats('ДР');
@@ -598,8 +588,8 @@ export default function App() {
 
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
-  const isAdminOrOperator = activeRole === 'ADMIN' || activeRole === 'operator';
-  const visibleTransitions = isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
+  // ГОСТЬ НЕ МОЖЕТ МЕНЯТЬ СТАТУСЫ
+  const visibleTransitions = isGuest ? [] : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED));
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
@@ -619,10 +609,25 @@ export default function App() {
     <div>
       <header className="brand-header">
         <h1 className="brand-title">ДЕПО TMS</h1>
-        <span className="status-pill">{user?.name}</span>
+        <span className="status-pill">{user?.name} {isGuest ? '(Гость)' : ''}</span>
       </header>
 
       <div className="content-area">
+        {/* УВЕДОМЛЕНИЕ ДЛЯ ГОСТЯ */}
+        {isGuest && (
+          <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '18px' }}>⏳</span>
+              <div>
+                <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
+                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                  Вы зашли впервые. Вы можете просматривать данные, но для выполнения операций обратитесь к Администратору депо для получения роли.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {currentTab === 'home' && (
           <>
             {/* 1. БАННЕР-АЛАРМ ДИСПЕТЧЕРА */}
@@ -671,10 +676,10 @@ export default function App() {
                 ⚡ Быстрые действия
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {(activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
+                {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
                   <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Принять вагон</button>
                 )}
-                {canManageWarehouse && (
+                {!isGuest && canManageWarehouse && (
                   <button className="btn-secondary" onClick={() => openAddItemModal()}>+ Новый товар</button>
                 )}
                 <button className="btn-secondary" onClick={() => setCurrentTab('warehouse')}>📦 Склад ТМЦ</button>
@@ -897,7 +902,7 @@ export default function App() {
               })
             )}
 
-            {(activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
+            {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
           </>
         )}
 
@@ -1085,16 +1090,61 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />{user?.role === 'ADMIN' && <span style={{color: 'var(--brand)'}}>Симуляция: {currentRoleInfo?.label}</span>}</p>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                Роль в БД: <b>{user?.role || 'GUEST'}</b> 
+                {user?.role === 'ADMIN' && <br />}
+                {user?.role === 'ADMIN' && <span style={{color: 'var(--brand)'}}>Режим симуляции: {currentRoleInfo?.label}</span>}
+              </p>
             </div>
+
             {user?.role === 'ADMIN' ? (
               <>
+                {/* ПАНЕЛЬ СИМУЛЯЦИИ РОЛЕЙ ДЛЯ ТЕСТИРОВАНИЯ */}
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Тестирование ролей (Админ)</h4>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
                   <select className="select-field" style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} value={activeRole} onChange={e => handleRoleChange(e.target.value)}>
+                    <option value="GUEST">⏳ Гость (Режим наблюдения)</option>
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </div>
+
+                {/* 🎯 БЛОК УПРАВЛЕНИЯ ВСЕМИ ПОЛЬЗОВАТЕЛЯМИ ДЛЯ АДМИНА */}
+                <div className="premium-card">
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {allUsersList.map(u => (
+                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px' }}>
+                        <div>
+                          <div style={{ fontWeight: 'bold' }}>{u.name || 'Сотрудник'}</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</div>
+                        </div>
+                        <select
+                          className="select-field"
+                          style={{ margin: 0, padding: '4px 8px', fontSize: '11px', width: 'auto' }}
+                          value={u.role || 'GUEST'}
+                          onChange={async (e) => {
+                            const newRole = e.target.value;
+                            setLoading(true);
+                            const { error } = await supabase.from('users').update({ role: newRole }).eq('id', u.id);
+                            if (!error) {
+                              alert(`Права для ${u.name} изменены на: ${newRole}`);
+                              loadData();
+                            } else {
+                              alert('Ошибка изменения роли: ' + error.message);
+                            }
+                            setLoading(false);
+                          }}
+                        >
+                          <option value="GUEST">⏳ Гость (Без доступа)</option>
+                          {ROLES_LIST.map(r => (
+                            <option key={r.key} value={r.key}>{r.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>⚙️ Персонал и Нормативы цехов</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1117,7 +1167,11 @@ export default function App() {
                   </div>
                 </div>
               </>
-            ) : (<div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>🔒 Панель управления доступна только Начальнику депо.</div>)}
+            ) : (
+              <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
+                🔒 Панель управления ролями и персоналом доступна только Начальнику депо.
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1147,7 +1201,7 @@ export default function App() {
       </nav>
 
       {/* МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА */}
-      {showStockAdjustModal && adjustingItem && (
+      {!isGuest && showStockAdjustModal && adjustingItem && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>
@@ -1196,7 +1250,7 @@ export default function App() {
       )}
 
       {/* МОДАЛКА СОЗДАНИЯ / ИНВЕНТАРИЗАЦИИ ПАРАМЕТРОВ ТОВАРА */}
-      {showItemModal && (
+      {!isGuest && showItemModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Параметры и ревизия ТМЦ' : 'Новый товар на склад'}</h3>
@@ -1241,7 +1295,7 @@ export default function App() {
       )}
 
       {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
-      {showAddModal && (
+      {!isGuest && showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
@@ -1512,7 +1566,7 @@ export default function App() {
       )}
 
       {/* Модалка задержки */}
-      {showDelayModal && (
+      {!isGuest && showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', color: 'var(--status-paused)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
