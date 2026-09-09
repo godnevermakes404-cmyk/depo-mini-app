@@ -48,21 +48,25 @@ interface ShopMasterConfig { label: string; master: string; tg: string; role: st
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
+
+// 🎯 ЧИСТЫЙ СПИСОК ЦЕХОВ БЕЗ ЦИФРОВЫХ ИНДЕКСОВ
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
-  { key: 'wheels', label: '18 цех (Колёсный)' },
-  { key: 'brakes', label: '23 цех (АКП / Автотормозной)' },
+  { key: 'wheels', label: 'Колёсный цех' },
+  { key: 'brakes', label: 'Автотормозной цех (АКП)' },
   { key: 'body', label: 'Кузовной / Сварочный' },
-  { key: 'cooling', label: '12 цех (Холодильный)' },
-  { key: 'electric', label: '6 цех (Электрооборудование)' },
-  { key: 'prep', label: '17 цех (Ремонтно-заготовительный)' },
-  { key: 'mech_equip', label: '9 цех (Мехоборудование)' }
+  { key: 'cooling', label: 'Холодильный цех' },
+  { key: 'electric', label: 'Цех электрооборудования' },
+  { key: 'prep', label: 'Ремонтно-заготовительный цех' },
+  { key: 'mech_equip', label: 'Цех механического оборудования' }
 ];
+
 const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
 
+// 🎯 ОБНОВЛЕННЫЙ СПИСОК РОЛЕЙ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
@@ -72,13 +76,13 @@ const ROLES_LIST = [
   { key: 'deputy', label: '👔 Зам. нач. ремонтного цеха' },
   { key: 'otk', label: '🔍 ОТК — Дилявер' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
-  { key: 'wheels', label: '⚙️ Мастер 18 цеха (Колёсный) — Сирожиддин' },
-  { key: 'brakes', label: '🛑 Мастер 23 цеха (АКП) — Юсупов' },
+  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха — Сирожиддин' },
+  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП) — Юсупов' },
   { key: 'body', label: '🔨 Мастер Кузовного цеха' },
-  { key: 'cooling', label: '❄️ Мастер 12 цеха (Холодильный) — Алишер' },
-  { key: 'electric', label: '⚡ Мастер 6 цеха (Электро) — Айдер' },
-  { key: 'prep', label: '📐 Мастер 17 цеха (Заготовительный) — Ровшан' },
-  { key: 'mech_equip', label: '⛓️ Мастер 9 цеха (Мехоборудование) — Шоюнус' },
+  { key: 'cooling', label: '❄️ Мастер Холодильного цеха — Алишер' },
+  { key: 'electric', label: '⚡ Мастер электрооборудования — Айдер' },
+  { key: 'prep', label: '📐 Мастер заготовительного цеха — Ровшан' },
+  { key: 'mech_equip', label: '⛓️ Мастер мехоборудования — Шоюнус' },
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
@@ -101,7 +105,7 @@ export default function App() {
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState('12 цех (Холодильный)');
+  const [itemCategory, setItemCategory] = useState('Холодильный цех');
   const [itemQty, setItemQty] = useState('10');
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
@@ -110,19 +114,20 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
+  // 🎯 ЧИСТЫЕ НАЗВАНИЯ В НАСТРОЙКАХ СТАФФА
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Рустамжон', tg: '@Rustamjon_5171', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цехов', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
     deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Зам. начальника', tg: '@Smets_1964', role: 'DEPUTY', targetHours: 0 },
     otk: { label: 'ОТК (Отдел технического контроля)', master: 'Дилявер', tg: '@Dilyawer282', role: 'OTK', targetHours: 1 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
-    wheels: { label: '18 цех (Колёсный)', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
-    brakes: { label: '23 цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
+    wheels: { label: 'Колёсный цех', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
+    brakes: { label: 'Автотормозной цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
     body: { label: 'Кузовной / Сварочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
-    cooling: { label: '12 цех (Холодильный)', master: 'Алишер', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
-    electric: { label: '6 цех (Электрооборудование)', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
-    prep: { label: '17 цех (Ремонтно-заготовительный)', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
-    mech_equip: { label: '9 цех (Механическое оборудование)', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
+    cooling: { label: 'Холодильный цех', master: 'Алишер', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
+    electric: { label: 'Цех электрооборудования', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
+    prep: { label: 'Ремонтно-заготовительный цех', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
+    mech_equip: { label: 'Цех механического оборудования', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
     docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
   });
 
@@ -252,7 +257,7 @@ export default function App() {
     } else {
       setEditingItem(null);
       setItemName('');
-      setItemCategory('12 цех (Холодильный)');
+      setItemCategory('Холодильный цех');
       setItemQty('10');
       setItemUnit('шт');
       setItemMinLimit('5');
@@ -324,7 +329,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 📷 ФУНКЦИЯ ЗАГРУЗКИ ФОТО АКТА ВУ-22 ИЗ ГАЛЕРЕИ ИЛИ КАМЕРЫ
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !selectedCase) return;
@@ -513,7 +517,6 @@ export default function App() {
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
-  // 🎯 ПРОВЕРКА НАЛИЧИЯ ФОТО АКТА ВУ-22
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
 
@@ -727,12 +730,12 @@ export default function App() {
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
               >
                 <option value="">Все цеха и категории</option>
-                <option value="12 цех (Холодильный)">❄️ 12 цех (Холодильный)</option>
-                <option value="18 цех (Колёсный)">⚙️ 18 цех (Колёсный)</option>
-                <option value="23 цех (АКП)">🛑 23 цех (АКП)</option>
-                <option value="6 цех (Электрооборудование)">⚡ 6 цех (Электро)</option>
-                <option value="17 цех (Ремонтно-заготовительный)">📐 17 цех (Заготовительный)</option>
-                <option value="9 цех (Механическое оборудование)">⛓️ 9 цех (Мехоборудование)</option>
+                <option value="Холодильный цех">❄️ Холодильный цех</option>
+                <option value="Колёсный цех">⚙️ Колёсный цех</option>
+                <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
+                <option value="Цех электрооборудования">⚡ Цех электрооборудования</option>
+                <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
+                <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
                 <option value="Тележечный цех">🔧 Тележечный цех</option>
                 <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
               </select>
@@ -914,12 +917,12 @@ export default function App() {
             <input className="input-field" type="text" placeholder="Наименование детали / материала" value={itemName} onChange={e => setItemName(e.target.value)} />
             
             <select className="select-field" value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
-              <option value="12 цех (Холодильный)">❄️ 12 цех (Холодильный)</option>
-              <option value="18 цех (Колёсный)">⚙️ 18 цех (Колёсный)</option>
-              <option value="23 цех (АКП)">🛑 23 цех (АКП)</option>
-              <option value="6 цех (Электрооборудование)">⚡ 6 цех (Электро)</option>
-              <option value="17 цех (Ремонтно-заготовительный)">📐 17 цех (Заготовительный)</option>
-              <option value="9 цех (Механическое оборудование)">⛓️ 9 цех (Мехоборудование)</option>
+              <option value="Холодильный цех">❄️ Холодильный цех</option>
+              <option value="Колёсный цех">⚙️ Колёсный цех</option>
+              <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
+              <option value="Цех электрооборудования">⚡ Цех электрооборудования</option>
+              <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
+              <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
               <option value="Тележечный цех">🔧 Тележечный цех</option>
               <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
             </select>
@@ -1073,7 +1076,6 @@ export default function App() {
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
                   
-                  {/* 🎯 БЛОК ЗАГРУЗКИ И СТАТУСА ФОТО АКТА ВУ-22 */}
                   <div style={{ background: 'var(--bg-color)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
                       <div style={{ fontWeight: 'bold' }}>📸 Фото / Скан Акта ВУ-22:</div>
