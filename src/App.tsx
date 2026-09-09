@@ -159,7 +159,6 @@ export default function App() {
 
   useEffect(() => { initAuthAndData(); }, []);
 
-  // 🎯 РЕГИСТРАЦИЯ НОВЫХ ПОЛЬЗОВАТЕЛЕЙ В СТАТУСЕ GUEST
   async function initAuthAndData() {
     let tg: any = null;
     let tgUser: any = null;
@@ -191,7 +190,6 @@ export default function App() {
         setUser(dbUser); 
         setActiveRole(dbUser.role || 'GUEST');
       } else {
-        // НОВЫЙ ПОЛЬЗОВАТЕЛЬ -> СОЗДАЕТСЯ КАК GUEST
         const { data: newUser } = await supabase
           .from('users')
           .insert([{ telegram_id: tgIdStr, name: fullName, role: 'GUEST' }])
@@ -207,7 +205,6 @@ export default function App() {
         }
       }
     } else {
-      // Фолбэк для десктоп приложения если ID опущен
       const { data: adminUser } = await supabase.from('users').select('*').eq('role', 'ADMIN').limit(1).maybeSingle();
       if (adminUser) {
         setUser(adminUser);
@@ -258,7 +255,6 @@ export default function App() {
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
-  // ФИЛЬТРЫ ДОСТУПА НА КЛИЕНТЕ
   const isGuest = activeRole === 'GUEST';
   const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
@@ -294,9 +290,7 @@ export default function App() {
     });
 
     if (!error) {
-      setShowStockAdjustModal(false);
-      setAdjustingItem(null);
-      loadData();
+      setShowStockAdjustModal(false); setAdjustingItem(null); loadData();
     } else {
       alert('Ошибка изменения остатков: ' + error.message);
     }
@@ -397,8 +391,7 @@ export default function App() {
 
     if (!error) {
       alert(`Вагон №${wagonNum} успешно удален из базы.`);
-      setSelectedCase(null);
-      loadData();
+      setSelectedCase(null); loadData();
     } else {
       alert('Ошибка удаления вагона: ' + error.message);
     }
@@ -446,8 +439,7 @@ export default function App() {
 
   async function handleSignAct(shopKey: string) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
-    setLoading(true);
-    vibrate('medium');
+    setLoading(true); vibrate('medium');
     const signLabel = getMasterLabel(shopKey);
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { 
       p_repair_id: selectedCase.repair_id, 
@@ -588,7 +580,6 @@ export default function App() {
 
   const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
 
-  // ГОСТЬ НЕ МОЖЕТ МЕНЯТЬ СТАТУСЫ
   const visibleTransitions = isGuest ? [] : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED));
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
@@ -621,7 +612,7 @@ export default function App() {
               <div>
                 <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Вы зашли впервые. Вы можете просматривать данные, но для выполнения операций обратитесь к Администратору депо для получения роли.
+                  Вы зашли впервые. Обратитесь к Администратору депо для получения доступа.
                 </div>
               </div>
             </div>
@@ -661,7 +652,7 @@ export default function App() {
                 <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
               </div>
               <div className="stat-box paused" onClick={() => goToWagons(CASE_STATUS.PAUSED)}>
-                <span className="stat-label">Задержано</span>
+                <span className="stat-label">За задержано</span>
                 <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
               </div>
               <div className="stat-box ready" onClick={() => goToWagons(CASE_STATUS.READY)}>
@@ -1103,24 +1094,24 @@ export default function App() {
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
                   <select className="select-field" style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} value={activeRole} onChange={e => handleRoleChange(e.target.value)}>
-                    <option value="GUEST">⏳ Гость (Режим наблюдения)</option>
+                    <option value="GUEST">⏳ Гость (Без доступа)</option>
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </div>
 
-                {/* 🎯 БЛОК УПРАВЛЕНИЯ ВСЕМИ ПОЛЬЗОВАТЕЛЯМИ ДЛЯ АДМИНА */}
+                {/* 🎯 ИСПРАВЛЕННЫЙ БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ (БЕЗ ВЫЛЕЗАЮЩИХ СЕЛЕКТОВ) */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {allUsersList.map(u => (
-                      <div key={u.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px' }}>
-                        <div>
-                          <div style={{ fontWeight: 'bold' }}>{u.name || 'Сотрудник'}</div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</div>
+                      <div key={u.id} className="user-row-card">
+                        <div className="user-row-header">
+                          <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
                         </div>
                         <select
                           className="select-field"
-                          style={{ margin: 0, padding: '4px 8px', fontSize: '11px', width: 'auto' }}
+                          style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
                           value={u.role || 'GUEST'}
                           onChange={async (e) => {
                             const newRole = e.target.value;

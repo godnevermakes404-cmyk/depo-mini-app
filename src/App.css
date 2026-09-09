@@ -353,3 +353,27 @@ body {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
 }
+/* КАРТОЧКА УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ */
+.user-row-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-main);
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.user-row-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.user-row-card select {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
