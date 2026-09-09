@@ -14,7 +14,7 @@ import './App.css';
 
 declare global { interface Window { Telegram: any; } }
 
-type AppTab = 'home' | 'wagons' | 'analytics' | 'profile';
+type AppTab = 'home' | 'wagons' | 'warehouse' | 'analytics' | 'profile';
 
 export const CASE_STATUS = {
   PLANNED: '01 PLANNED',
@@ -45,6 +45,7 @@ interface DelayLog {
   responsible_party: string; start_datetime: string; end_datetime: string | null; next_action: string | null;
 }
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
+interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 const DEFAULT_SHOPS = [
@@ -58,12 +59,15 @@ const TRACKS_CONFIG = [
   { track: 'Путь 1', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] },
   { track: 'Путь 2', positions: ['Позиция 1', 'Позиция 2', 'Позиция 3'] }
 ];
+
+// 🎯 ДОБАВЛЕН ОТК В СПИСОК РОЛЕЙ
 const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер (Размещение вагонов)' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
   { key: 'procurement', label: '📦 Отдел снабжения / Закупки (Материалы)' },
   { key: 'mechanic', label: '🛠 Начальник цеха (отвечает за ремонт и за остальные цеха)' },
+  { key: 'otk', label: '🔍 Инспектор ОТК (Контроль качества)' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха' },
@@ -78,18 +82,33 @@ export default function App() {
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
 
+  // Фильтры вагонов
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
   const [delayCategoryFilter, setDelayCategoryFilter] = useState<string | null>(null);
 
+  // Складские состояния
+  const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
+  const [warehouseSearch, setWarehouseSearch] = useState<string>('');
+  const [warehouseCatFilter, setWarehouseCatFilter] = useState<string | null>(null);
+  const [showItemModal, setShowItemModal] = useState<boolean>(false);
+  const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
+  const [itemName, setItemName] = useState('');
+  const [itemCategory, setItemCategory] = useState('Холодильный цех');
+  const [itemQty, setItemQty] = useState('10');
+  const [itemUnit, setItemUnit] = useState('шт');
+  const [itemMinLimit, setItemMinLimit] = useState('5');
+
   const [repairs, setRepairs] = useState<RepairCase[]>([]);
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
+  // 🎯 ДОБАВЛЕН ОТК В НАСТРОЙКИ СТАФФА
   const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
     procurement: { label: 'Отдел снабжения / Закупки', master: 'Петров В.В.', tg: '@depo_supply', role: 'SUPPLY', targetHours: 0 },
     mechanic: { label: 'Начальник цеха (отвечает за ремонт и за остальные цеха)', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
+    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Инспектор ОТК', tg: '@depo_otk', role: 'OTK', targetHours: 1 },
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Петров П.П.', tg: '@master_wheels', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех', master: 'Сидоров С.С.', tg: '@master_brakes', role: 'MASTER', targetHours: 2 },
@@ -155,6 +174,7 @@ export default function App() {
 
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
     const { data: mastersData } = await supabase.from('shop_masters').select('*');
+    const { data: whItems } = await supabase.from('warehouse_items').select('*').order('name', { ascending: true });
     
     if (mastersData && mastersData.length > 0) {
       const mapped: Record<string, ShopMasterConfig> = {};
@@ -162,6 +182,7 @@ export default function App() {
       setShopMasters(prev => ({ ...prev, ...mapped }));
     }
 
+    if (whItems) setWarehouseItems(whItems as WarehouseItem[]);
     if (repairData) {
       setRepairs(repairData as unknown as RepairCase[]);
       setDelayLogs(delays as DelayLog[] || []);
@@ -171,6 +192,7 @@ export default function App() {
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   const canPerformAction = (targetShopKey: string) => activeRole === 'ADMIN' || activeRole === targetShopKey;
+  const canManageWarehouse = activeRole === 'ADMIN' || activeRole === 'procurement';
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
@@ -184,6 +206,49 @@ export default function App() {
     }
     alert('Персонал сохранен!'); setLoading(false); loadData();
   }
+
+  async function handleSaveWarehouseItem() {
+    if (!itemName.trim()) { alert('Введите наименование позиции!'); return; }
+    setLoading(true); vibrate('medium');
+    const { error } = await supabase.rpc('save_warehouse_item', {
+      p_id: editingItem ? editingItem.id : null,
+      p_name: itemName,
+      p_category: itemCategory,
+      p_quantity: Number(itemQty) || 0,
+      p_unit: itemUnit,
+      p_min_limit: Number(itemMinLimit) || 0,
+      p_user_id: user?.id
+    });
+
+    if (!error) {
+      setShowItemModal(false);
+      setEditingItem(null);
+      setItemName('');
+      loadData();
+    } else {
+      alert('Ошибка сохранения склада: ' + error.message);
+    }
+    setLoading(false);
+  }
+
+  const openAddItemModal = (item?: WarehouseItem) => {
+    if (item) {
+      setEditingItem(item);
+      setItemName(item.name);
+      setItemCategory(item.category);
+      setItemQty(String(item.quantity));
+      setItemUnit(item.unit);
+      setItemMinLimit(String(item.min_limit));
+    } else {
+      setEditingItem(null);
+      setItemName('');
+      setItemCategory('Холодильный цех');
+      setItemQty('10');
+      setItemUnit('шт');
+      setItemMinLimit('5');
+    }
+    setShowItemModal(true);
+  };
 
   async function openCaseDetails(item: RepairCase) {
     vibrate('light'); setSelectedCase(item);
@@ -304,6 +369,12 @@ export default function App() {
       const activeDelay = delayLogs.find(d => d.repair_id === r.repair_id && !d.end_datetime);
       if (!activeDelay || activeDelay.category !== delayCategoryFilter) return false;
     }
+    return true;
+  });
+
+  const filteredWarehouseItems = warehouseItems.filter(item => {
+    if (warehouseCatFilter && item.category !== warehouseCatFilter) return false;
+    if (warehouseSearch.trim() && !item.name.toLowerCase().includes(warehouseSearch.trim().toLowerCase())) return false;
     return true;
   });
 
@@ -508,7 +579,6 @@ export default function App() {
                 const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
                 const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
                 
-                // 🎯 ГАРАНТИРОВАННЫЙ РАСЧЕТ ДАТЫ И ДНЕЙ
                 const createdDate = item.created_at ? new Date(item.created_at) : new Date();
                 const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
                 const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
@@ -527,7 +597,6 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* 🎯 ЗАМЕТНАЯ СТРОКА ДАТЫ ЗАХОДА В ДЕПО */}
                     <div style={{ fontSize: '11px', color: 'var(--brand-color)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       📅 Заход: {formattedDate} ({daysOnSite} дн.)
                     </div>
@@ -543,6 +612,83 @@ export default function App() {
             )}
 
             {(activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
+          </>
+        )}
+
+        {/* ВКЛАДКА СКЛАД */}
+        {currentTab === 'warehouse' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
+              {canManageWarehouse && (
+                <button className="btn-primary" style={{ padding: '4px 10px', fontSize: '11px', width: 'auto' }} onClick={() => openAddItemModal()}>
+                  + Приход / Добавить
+                </button>
+              )}
+            </div>
+
+            <div className="premium-card" style={{ padding: '8px 10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <input 
+                className="input-field" 
+                style={{ margin: 0, padding: '6px 10px', fontSize: '12px' }} 
+                type="text" 
+                placeholder="🔍 Поиск детали или материала..." 
+                value={warehouseSearch} 
+                onChange={e => setWarehouseSearch(e.target.value)} 
+              />
+
+              <select 
+                className="select-field" 
+                style={{ margin: 0, padding: '4px 6px', fontSize: '11px' }} 
+                value={warehouseCatFilter || ''} 
+                onChange={e => setWarehouseCatFilter(e.target.value || null)}
+              >
+                <option value="">Все цеха и категории</option>
+                <option value="Холодильный цех">❄️ Холодильный цех</option>
+                <option value="Колёсный цех">⚙️ Колёсный цех</option>
+                <option value="Тележечный цех">🔧 Тележечный цех</option>
+                <option value="Автотормозной цех">🛑 Автотормозной цех</option>
+                <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredWarehouseItems.map(item => {
+                const isOutOfStock = Number(item.quantity) <= 0;
+                const isLowStock = Number(item.quantity) <= Number(item.min_limit) && !isOutOfStock;
+                
+                return (
+                  <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--danger)' : isLowStock ? '4px solid var(--warning)' : '4px solid var(--success)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold' }}>{item.name}</div>
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>{item.category}</div>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '15px', fontWeight: '800', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
+                          {item.quantity} {item.unit}
+                        </div>
+                        <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
+                          Мин. норма: {item.min_limit} {item.unit}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed var(--border-light)' }}>
+                      <span style={{ fontSize: '10px', fontWeight: 'bold', color: isOutOfStock ? 'var(--danger)' : isLowStock ? 'var(--warning)' : 'var(--success)' }}>
+                        {isOutOfStock ? '🔴 Нет на складе (Дефицит)' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
+                      </span>
+
+                      {canManageWarehouse && (
+                        <button className="btn-secondary" style={{ padding: '2px 8px', fontSize: '10px', width: 'auto' }} onClick={() => openAddItemModal(item)}>
+                          ✏️ Изменить
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
 
@@ -669,9 +815,42 @@ export default function App() {
       <nav className="bottom-nav">
         <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}><div className="nav-icon">🏠</div><span>Главная</span></button>
         <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}><div className="nav-icon">🚆</div><span>Вагоны</span></button>
+        <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}><div className="nav-icon">📦</div><span>Склад</span></button>
         <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}><div className="nav-icon">📊</div><span>Аналитика</span></button>
         <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}><div className="nav-icon">👤</div><span>Профиль</span></button>
       </nav>
+
+      {/* Модалка: ПРИХОД / ИЗМЕНЕНИЕ ПОЗИЦИИ СКЛАДА */}
+      {showItemModal && (
+        <div className="backdrop">
+          <div className="bottom-sheet">
+            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Редактирование ТМЦ' : 'Приход на склад'}</h3>
+            <input className="input-field" type="text" placeholder="Наименование детали / материала" value={itemName} onChange={e => setItemName(e.target.value)} />
+            
+            <select className="select-field" value={itemCategory} onChange={e => setItemCategory(e.target.value)}>
+              <option value="Холодильный цех">❄️ Холодильный цех</option>
+              <option value="Колёсный цех">⚙️ Колёсный цех</option>
+              <option value="Тележечный цех">🔧 Тележечный цех</option>
+              <option value="Автотормозной цех">🛑 Автотормозной цех</option>
+              <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
+            </select>
+
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <input className="input-field" style={{ flex: 1 }} type="number" placeholder="Количество" value={itemQty} onChange={e => setItemQty(e.target.value)} />
+              <input className="input-field" style={{ flex: 0.8 }} type="text" placeholder="Ед. изм (шт/л/кг)" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
+            </div>
+
+            <input className="input-field" type="number" placeholder="Минимальный остаток (норма)" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
+
+            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+              <button className="btn-secondary" onClick={() => setShowItemModal(false)}>Отмена</button>
+              <button className="btn-primary" onClick={handleSaveWarehouseItem} disabled={loading}>
+                Сохранить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Модалка: МАССОВАЯ ПРИЕМКА ВАГОНОВ */}
       {showAddModal && (
