@@ -148,7 +148,6 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // 🎯 КПП ВВОДИТ ТОЛЬКО КОЛИЧЕСТВО ВАГОНОВ
   const [arrivalCount, setArrivalCount] = useState<number>(1);
   const [editingWagonNum, setEditingWagonNum] = useState<string>('');
 
@@ -356,7 +355,6 @@ export default function App() {
     setDocuments(docs || []);
   }
 
-  // 🎯 КПП ВВОДИТ ТОЛЬКО КОЛИЧЕСТВО ВАГОНОВ
   async function handleKppArrival() {
     if (isGuest) return;
     if (arrivalCount <= 0) { alert('Укажите количество вагонов!'); return; }
@@ -379,7 +377,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // 🎯 ОПЕРАТОР ПРИСВАИВАЕТ 8-ЗНАЧНЫЙ НОМЕР
   async function handleSaveWagonNumber() {
     if (!selectedCase?.wagons?.id || !editingWagonNum.trim()) return;
     if (!/^\d{8}$/.test(editingWagonNum.trim())) {
@@ -522,7 +519,12 @@ export default function App() {
       setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('change_repair_status', { p_repair_id: selectedCase.repair_id, p_user_id: user?.id || null, p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` });
+    const { error } = await supabase.rpc('change_repair_status', { 
+      p_repair_id: selectedCase.repair_id, 
+      p_new_status: newStatus,
+      p_user_id: user?.id || null, 
+      p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` 
+    });
     if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
@@ -647,7 +649,7 @@ export default function App() {
           </div>
         )}
 
-        {/* 🎯 СИГНАЛ ОПЕРАТОРУ О НЕОФОРМЛЕННЫХ ВАГОНАХ С КПП */}
+        {/* СИГНАЛ ОПЕРАТОРУ О НЕОФОРМЛЕННЫХ ВАГОНАХ С КПП */}
         {unassignedWagonsCount > 0 && isAdminOrOperator && (
           <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }} onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1346,7 +1348,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 🎯 Модалка: ПРОСТОЙ ВВОД КОЛИЧЕСТВА НА КПП */}
+      {/* Модалка: ПРОСТОЙ ВВОД КОЛИЧЕСТВА НА КПП */}
       {!isGuest && showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -1391,7 +1393,7 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* 🎯 БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА */}
+            {/* БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА */}
             {isAdminOrOperator && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
                 <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
