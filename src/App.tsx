@@ -158,20 +158,43 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
+    let tg: any = null;
     let tgUser: any = null;
     try {
-      const tg = window.Telegram?.WebApp || WebApp;
-      if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor?.('bg_main'); tgUser = tg.initDataUnsafe?.user; }
+      tg = window.Telegram?.WebApp || WebApp;
+      if (tg) { 
+        tg.ready(); 
+        tg.expand(); 
+        tg.setHeaderColor?.('bg_main'); 
+        tgUser = tg.initDataUnsafe?.user; 
+      }
     } catch (e) {}
 
-    if (!tgUser?.id) { setIsOutsideTelegram(true); return; }
+    const hasTgContext = Boolean(window.Telegram?.WebApp) || Boolean(tg?.initData);
+    if (!hasTgContext && !tgUser) { 
+      setIsOutsideTelegram(true); 
+      return; 
+    }
 
-    const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgUser.id).maybeSingle();
+    setIsOutsideTelegram(false);
+
+    const effectiveTgId = tgUser?.id ? String(tgUser.id) : 'desktop_admin';
+    const effectiveName = tgUser 
+      ? `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() 
+      : 'Владимир (Десктоп)';
+
+    const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', effectiveTgId).maybeSingle();
     if (dbUser) {
-      setUser(dbUser); setActiveRole(dbUser.role || 'GUEST');
+      setUser(dbUser); 
+      setActiveRole(dbUser.role || 'ADMIN');
     } else {
-      const { data: newUser } = await supabase.from('users').insert([{ telegram_id: tgUser.id, name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim(), role: 'GUEST' }]).select().single();
-      setUser(newUser); setActiveRole('GUEST');
+      const { data: newUser } = await supabase
+        .from('users')
+        .insert([{ telegram_id: effectiveTgId, name: effectiveName, role: 'ADMIN' }])
+        .select()
+        .single();
+      setUser(newUser); 
+      setActiveRole('ADMIN');
     }
     loadData();
   }
@@ -202,7 +225,6 @@ export default function App() {
     }
   }
 
-  // 🎯 ФУНКЦИЯ ДЛЯ ПРАВИЛЬНОГО ПЕРЕХОДА ВО ВКАДКУ ВАГОНЫ С ПРОКРУТКОЙ НАВЕРХ
   const goToWagons = (status: string | null) => {
     vibrate('light');
     setStatusFilter(status);
