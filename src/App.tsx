@@ -578,6 +578,7 @@ export default function App() {
       <div className="content-area">
         {currentTab === 'home' && (
           <>
+            {/* 1. АЛАРМЫ ДИСПЕТЧЕРА */}
             {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)', background: 'rgba(255, 59, 48, 0.05)' }}>
                 <h4 style={{ margin: '0 0 8px 0', color: 'var(--danger)', fontSize: '13px' }}>🚨 Требуют внимания диспетчера</h4>
@@ -588,13 +589,146 @@ export default function App() {
                 </div>
               </div>
             )}
-            <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length}</h3>
+
+            <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px' }}>На территории депо: {onSiteRepairs.length} ваг.</h3>
+            
+            {/* 2. СТАТИСТИКА */}
             <div className="stats-grid">
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.QUEUE); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--warning)' }}>В очереди</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.IN_REPAIR); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--brand-color)' }}>В ремонте</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span></div>
-              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>Задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
+              <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--danger)' }}>За задержано</span><span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span></div>
               <div className="stat-box" onClick={() => { setStatusFilter(CASE_STATUS.READY); setCurrentTab('wagons'); }}><span className="stat-label" style={{ color: 'var(--success)' }}>Готовы</span><span className="stat-value">{readyNotDispatched.length}</span></div>
             </div>
+
+            {/* 3. БЫСТРЫЕ ДЕЙСТВИЯ (QUICK ACTIONS) */}
+            <div className="premium-card" style={{ padding: '10px' }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>⚡ Быстрые действия</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                {(activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
+                  <button className="btn-primary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setShowAddModal(true)}>
+                    ➕ Принять вагон
+                  </button>
+                )}
+                {canManageWarehouse && (
+                  <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => openAddItemModal()}>
+                    📦 Новый товар
+                  </button>
+                )}
+                <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setCurrentTab('warehouse')}>
+                  🔍 Склад ТМЦ
+                </button>
+                <button className="btn-secondary" style={{ padding: '8px', fontSize: '11px', textTransform: 'none' }} onClick={() => setCurrentTab('analytics')}>
+                  📊 Аналитика
+                </button>
+              </div>
+            </div>
+
+            {/* 4. РАЗБОР ЗАДЕРЖАННЫХ ВАГОНОВ */}
+            {(() => {
+              const activeDelays = delayLogs.filter(d => !d.end_datetime);
+              const matCount = activeDelays.filter(d => d.category === 'Materials').length;
+              const eqCount = activeDelays.filter(d => d.category === 'Equipment').length;
+              const custCount = activeDelays.filter(d => d.category === 'Customer').length;
+              const rwCount = activeDelays.filter(d => d.category === 'Railway').length;
+
+              if (activeDelays.length === 0) return null;
+
+              return (
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--danger)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--danger)' }}>🛑 Разбор задержек ({activeDelays.length} ваг.)</h4>
+                    <span style={{ fontSize: '10px', color: 'var(--brand-color)', cursor: 'pointer', fontWeight: 'bold' }} onClick={() => { setStatusFilter(CASE_STATUS.PAUSED); setCurrentTab('wagons'); }}>Все задержки →</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                      <span>📦 Запчасти / Материалы: <b>{matCount} ваг.</b></span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Отв: Рустамжон</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                      <span>🛠 Поломка оборудования: <b>{eqCount} ваг.</b></span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: '10px' }}>Отв: Абдурахмонжон</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                      <span>👤 Ждём решения Заказчика: <b>{custCount} ваг.</b></span>
+                    </div>
+                    {rwCount > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                        <span>🚂 Железная дорога (ЖД): <b>{rwCount} ваг.</b></span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 5. ГОРЯЩИЕ ВАГОНЫ С НАИБОЛЬШИМ ПРОСТОЕМ */}
+            {(() => {
+              const criticalWagons = repairs
+                .filter(r => r.current_status !== CASE_STATUS.READY)
+                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                .slice(0, 3);
+
+              if (criticalWagons.length === 0) return null;
+
+              return (
+                <div className="premium-card">
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand-color)' }}>🔥 Вагоны с наибольшим простоем</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {criticalWagons.map(item => {
+                      const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - new Date(item.created_at).getTime()) / (1000 * 60 * 60 * 24)));
+                      const isPaused = item.current_status === CASE_STATUS.PAUSED;
+
+                      return (
+                        <div 
+                          key={item.repair_id} 
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', cursor: 'pointer' }}
+                          onClick={() => openCaseDetails(item)}
+                        >
+                          <div>
+                            <div style={{ fontWeight: 'bold', fontSize: '12px' }}>№ {item.wagons?.wagon_number}</div>
+                            <div style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontWeight: 'bold', color: isPaused ? 'var(--danger)' : daysOnSite > 3 ? 'var(--warning)' : 'var(--brand-color)' }}>
+                              {daysOnSite} дн. в депо
+                            </span>
+                            <div style={{ fontSize: '9px', color: 'var(--text-muted)' }}>{STATUS_RU[item.current_status] || item.current_status}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 6. СИГНАЛ ДЕФИЦИТА СКЛАДА */}
+            {(() => {
+              const deficitItems = warehouseItems.filter(i => Number(i.quantity) <= Number(i.min_limit)).slice(0, 3);
+              if (deficitItems.length === 0) return null;
+
+              return (
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--warning)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '13px', color: 'var(--warning)' }}>⚠️ Внимание: Низкий остаток ТМЦ</h4>
+                    <span style={{ fontSize: '10px', color: 'var(--brand-color)', cursor: 'pointer', fontWeight: 'bold' }} onClick={() => setCurrentTab('warehouse')}>На склад →</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                    {deficitItems.map(item => {
+                      const isZero = Number(item.quantity) <= 0;
+                      return (
+                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-color)', padding: '6px 8px', borderRadius: '6px' }}>
+                          <span>{item.name} <span style={{ color: 'var(--text-muted)', fontSize: '9px' }}>({item.category})</span></span>
+                          <span style={{ fontWeight: 'bold', color: isZero ? 'var(--danger)' : 'var(--warning)' }}>
+                            {item.quantity} {item.unit} {isZero ? '(ДЕФИЦИТ)' : `(Мин: ${item.min_limit})`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </>
         )}
 
