@@ -352,10 +352,21 @@ export default function App() {
     setDocuments(docs || []);
   }
 
+  // 🎯 ВАЛИДАЦИЯ НОМЕРА ВАГОНА: СТРОГО 8 ЦИФР
   async function handleCreateRepair() {
     if (isGuest) return;
-    const numbers = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8);
-    if (numbers.length === 0) { alert('Введите корректные 8-значные номера вагонов!'); return; }
+    
+    // Фильтруем введенные данные по строгому шаблону: ровно 8 цифр
+    const numbers = wagonNumbersInput
+      .split(/[\s,]+/)
+      .map(n => n.trim())
+      .filter(n => /^\d{8}$/.test(n));
+
+    if (numbers.length === 0) { 
+      alert('⚠️ Введите корректный 8-значный НОМЕР ВАГОНА (только 8 цифр, без букв)!'); 
+      return; 
+    }
+
     setLoading(true); vibrate('medium');
     let successCount = 0; const addedWagons: string[] = []; let lastDbError = '';
 
@@ -578,7 +589,11 @@ export default function App() {
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
 
-  const parsedWagonsCount = wagonNumbersInput.split(/[\s,]+/).filter(n => n.trim().length === 8).length;
+  // 🎯 РАСПОЗНАВАНИЕ ТОЛЬКО 8 ЦИФР
+  const parsedWagonsCount = wagonNumbersInput
+    .split(/[\s,]+/)
+    .map(n => n.trim())
+    .filter(n => /^\d{8}$/.test(n)).length;
 
   const visibleTransitions = isGuest ? [] : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED));
 
@@ -1099,7 +1114,7 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* 🎯 БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ С ИСПОЛЬЗОВАНИЕМ RPC */}
+                {/* БЛОК УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЯМИ С ИСПОЛЬЗОВАНИЕМ RPC */}
                 <div className="premium-card">
                   <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -1125,7 +1140,6 @@ export default function App() {
 
                             if (!error) {
                               alert(`Права для ${u.name} изменены на: ${newRole}`);
-                              // Мгновенно обновляем интерфейс
                               setAllUsersList(prev => prev.map(userItem => 
                                 userItem.id === u.id ? { ...userItem, role: newRole } : userItem
                               ));
@@ -1300,8 +1314,8 @@ export default function App() {
         <div className="backdrop">
           <div className="bottom-sheet">
             <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>🛡️ КПП: Приемка вагонов</h3>
-            <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (через пробел или с новой строки)" rows={3} />
-            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand)' : 'var(--text-secondary)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов: {parsedWagonsCount} шт.</div>
+            <textarea className="textarea-field" value={wagonNumbersInput} onChange={e => setWagonNumbersInput(e.target.value)} placeholder="Введите 8-значные номера вагонов (только цифры, по 1 на строку или через пробел)" rows={3} />
+            <div style={{ fontSize: '11px', color: parsedWagonsCount > 0 ? 'var(--brand)' : 'var(--text-secondary)', fontWeight: 'bold', marginBottom: '8px', textAlign: 'right' }}>Распознано вагонов (8 цифр): {parsedWagonsCount} шт.</div>
             
             <select className="select-field" value={ownerType} onChange={e => setOwnerType(e.target.value)}>
               <option value="Own">Собственный</option>
