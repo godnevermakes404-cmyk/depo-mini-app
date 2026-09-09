@@ -7,7 +7,7 @@ import {
   type DQViolation, type RepairTimeMetrics 
 } from './depoEngine';
 import { 
-  notifyWagonArrived, notifyWagonsArrivedBulk, notifyActSigned, notifyPositionAssigned, 
+  notifyWagonsArrivedBulk, notifyActSigned, notifyPositionAssigned, 
   notifyShopStageUpdated, notifyDelayRegistered, notifyStatusChanged 
 } from './telegramNotifier';
 import './App.css';
