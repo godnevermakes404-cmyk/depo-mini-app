@@ -756,20 +756,22 @@ export default function App() {
               </div>
             </div>
 
-            <div className="premium-card" style={{ padding: '8px 10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <input 
-                className="input-field" 
-                style={{ margin: 0, padding: '6px 10px', fontSize: '12px' }} 
-                type="text" 
-                placeholder="🔍 Поиск по номеру вагона..." 
-                value={searchQuery} 
-                onChange={e => setSearchQuery(e.target.value)} 
-              />
+            {/* 🎯 ОБНОВЛЕННЫЙ ИСПРАВЛЕННЫЙ БЛОК ФИЛЬТРОВ И ПОИСКА */}
+            <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="search-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input 
+                  className="input-field" 
+                  type="text" 
+                  placeholder="Поиск по номеру вагона..." 
+                  value={searchQuery} 
+                  onChange={e => setSearchQuery(e.target.value)} 
+                />
+              </div>
 
-              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto' }}>
+              <div className="filters-grid">
                 <select 
                   className="select-field" 
-                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1 }} 
                   value={statusFilter || ''} 
                   onChange={e => setStatusFilter(e.target.value || null)}
                 >
@@ -782,7 +784,6 @@ export default function App() {
 
                 <select 
                   className="select-field" 
-                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1 }} 
                   value={repairTypeFilter || ''} 
                   onChange={e => setRepairTypeFilter(e.target.value || null)}
                 >
@@ -792,20 +793,19 @@ export default function App() {
                   <option value="ТР">Текущий (ТР)</option>
                   <option value="КР">Капитальный (КР)</option>
                 </select>
-
-                <select 
-                  className="select-field" 
-                  style={{ margin: 0, padding: '4px 6px', fontSize: '11px', flex: 1.2 }} 
-                  value={delayCategoryFilter || ''} 
-                  onChange={e => setDelayCategoryFilter(e.target.value || null)}
-                >
-                  <option value="">Все задержки</option>
-                  <option value="Materials">📦 Запчасти / Материалы</option>
-                  <option value="Equipment">🛠 Оборудование</option>
-                  <option value="Customer">👤 Заказчик</option>
-                  <option value="Railway">🚂 ЖД</option>
-                </select>
               </div>
+
+              <select 
+                className="select-field" 
+                value={delayCategoryFilter || ''} 
+                onChange={e => setDelayCategoryFilter(e.target.value || null)}
+              >
+                <option value="">Все категории задержек</option>
+                <option value="Materials">📦 Запчасти / Материалы</option>
+                <option value="Equipment">🛠 Поломка оборудования</option>
+                <option value="Customer">👤 Заказчик</option>
+                <option value="Railway">🚂 Железная дорога</option>
+              </select>
             </div>
 
             {filteredRepairs.length === 0 ? (
@@ -865,19 +865,20 @@ export default function App() {
               )}
             </div>
 
-            <div className="premium-card" style={{ padding: '8px 10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <input 
-                className="input-field" 
-                style={{ margin: 0, padding: '6px 10px', fontSize: '12px' }} 
-                type="text" 
-                placeholder="🔍 Поиск детали или материала..." 
-                value={warehouseSearch} 
-                onChange={e => setWarehouseSearch(e.target.value)} 
-              />
+            <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="search-wrapper">
+                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input 
+                  className="input-field" 
+                  type="text" 
+                  placeholder="Поиск детали или материала..." 
+                  value={warehouseSearch} 
+                  onChange={e => setWarehouseSearch(e.target.value)} 
+                />
+              </div>
 
               <select 
                 className="select-field" 
-                style={{ margin: 0, padding: '4px 6px', fontSize: '11px' }} 
                 value={warehouseCatFilter || ''} 
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
               >
