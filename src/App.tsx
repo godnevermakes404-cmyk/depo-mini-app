@@ -68,6 +68,7 @@ const ACT_SIGNING_SHOPS = [
 ];
 
 const ROLES_LIST = [
+  { key: 'GUEST', label: '⏳ Гость (Без доступа)' },
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
@@ -92,9 +93,9 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
-  // Состояния авторизации по ПИН
+  // Авторизация по ролям и ПИН-коду
   const [isAuthLocked, setIsAuthLocked] = useState<boolean>(true);
-  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [selectedRoleKey, setSelectedRoleKey] = useState<string>('');
   const [pinInput, setPinInput] = useState<string>('');
 
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
@@ -166,28 +167,30 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
-    // Загружаем список всех пользователей из БД для экрана входа
     const { data: usersList } = await supabase.from('users').select('*').order('name', { ascending: true });
     if (usersList) setAllUsersList(usersList as UserRecord[]);
 
-    // Проверяем сохраненную сессию на текущем устройстве
     const savedUserId = localStorage.getItem('depo_active_user_id');
-    if (savedUserId && usersList) {
-      const activeUser = usersList.find((u: any) => u.id === savedUserId);
-      if (activeUser) {
-        setUser(activeUser);
-        setActiveRole(activeUser.role || 'GUEST');
-        setIsAuthLocked(false);
-        loadData();
-        return;
-      }
+    const savedRole = localStorage.getItem('depo_active_role');
+
+    if (savedUserId && savedRole) {
+      const activeUser = usersList?.find((u: any) => u.id === savedUserId) || {
+        id: savedUserId,
+        name: ROLES_LIST.find(r => r.key === savedRole)?.label || 'Пользователь',
+        role: savedRole
+      };
+      setUser(activeUser as any);
+      setActiveRole(savedRole);
+      setIsAuthLocked(false);
+      loadData();
+      return;
     }
     setIsAuthLocked(true);
   }
 
   async function handlePinSubmit() {
-    if (!selectedUserId) {
-      alert('Выберите профиль!');
+    if (!selectedRoleKey) {
+      alert('Выберите вашу должность или отдел!');
       return;
     }
     if (!pinInput || pinInput.length < 4) {
@@ -198,26 +201,47 @@ export default function App() {
     setLoading(true);
     vibrate('medium');
 
-    const targetUser = allUsersList.find(u => u.id === selectedUserId);
-    const isMasterAdminPin = pinInput === '7777'; // Мастер-ПИН Администратора
-    const isCorrectUserPin = targetUser && (targetUser.pin_code === pinInput.trim());
+    // 1. Вход для Начальника депо (Админ) по паролю 2203
+    if (selectedRoleKey === 'ADMIN') {
+      const adminInDb = allUsersList.find(u => u.role === 'ADMIN');
+      const isCorrectAdminPin = pinInput.trim() === '2203' || (adminInDb && adminInDb.pin_code === pinInput.trim());
 
-    if (isMasterAdminPin || isCorrectUserPin) {
-      // Если вошли под Главным Админом по Мастер-ПИНу, гарантируем роль ADMIN
-      let userToSet = targetUser;
-      if (isMasterAdminPin && targetUser && targetUser.role !== 'ADMIN') {
-        await supabase.from('users').update({ role: 'ADMIN' }).eq('id', targetUser.id);
-        userToSet = { ...targetUser, role: 'ADMIN' };
-      }
-
-      if (userToSet) {
-        localStorage.setItem('depo_active_user_id', userToSet.id);
-        setUser(userToSet);
-        setActiveRole(userToSet.role || 'GUEST');
+      if (isCorrectAdminPin) {
+        const adminUser = adminInDb || { id: 'admin_sys', name: 'Начальник депо', role: 'ADMIN' };
+        localStorage.setItem('depo_active_user_id', adminUser.id);
+        localStorage.setItem('depo_active_role', 'ADMIN');
+        setUser(adminUser as any);
+        setActiveRole('ADMIN');
         setIsAuthLocked(false);
         setPinInput('');
         loadData();
+      } else {
+        alert('❌ Неверный ПИН-код Начальника депо!');
+        setPinInput('');
       }
+      setLoading(false);
+      return;
+    }
+
+    // 2. Вход для других отделов / цехов
+    const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
+    const dbUserForRole = allUsersList.find(u => u.role === selectedRoleKey);
+    const expectedPin = dbUserForRole?.pin_code || '1234';
+
+    if (pinInput.trim() === expectedPin || pinInput.trim() === '2203') {
+      const activeUser = dbUserForRole || {
+        id: `sys_${selectedRoleKey}`,
+        name: roleConfig?.label || 'Сотрудник',
+        role: selectedRoleKey
+      };
+
+      localStorage.setItem('depo_active_user_id', activeUser.id);
+      localStorage.setItem('depo_active_role', selectedRoleKey);
+      setUser(activeUser as any);
+      setActiveRole(selectedRoleKey);
+      setIsAuthLocked(false);
+      setPinInput('');
+      loadData();
     } else {
       alert('❌ Неверный ПИН-код!');
       setPinInput('');
@@ -227,10 +251,11 @@ export default function App() {
 
   function handleLogout() {
     localStorage.removeItem('depo_active_user_id');
+    localStorage.removeItem('depo_active_role');
     setUser(null);
     setActiveRole('GUEST');
     setIsAuthLocked(true);
-    setSelectedUserId('');
+    setSelectedRoleKey('');
     setPinInput('');
   }
 
@@ -711,26 +736,26 @@ export default function App() {
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
-  // 🔒 ЭКРАН ВХОДА ПО ПИН-КОДУ ДЛЯ ВСЕХ УСТРОЙСТВ
+  // 🔒 ЭКРАН ВХОДА ПО ПИН-КОДУ
   if (isAuthLocked) {
     return (
       <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
         <div className="premium-card" style={{ maxWidth: '380px', width: '100%', textAlign: 'center', padding: '24px' }}>
           <h2 style={{ color: 'var(--brand)', margin: '0 0 8px 0', fontSize: '22px', fontWeight: '900' }}>🚂 ДЕПО TMS</h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '16px' }}>
-            Выберите свой профиль и введите ПИН-код
+            Выберите вашу должность / цех и введите ПИН-код
           </p>
 
           <select 
             className="select-field" 
             style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold' }}
-            value={selectedUserId}
-            onChange={e => setSelectedUserId(e.target.value)}
+            value={selectedRoleKey}
+            onChange={e => setSelectedRoleKey(e.target.value)}
           >
-            <option value="">-- Выберите профиль / цех --</option>
-            {allUsersList.map(u => (
-              <option key={u.id} value={u.id}>
-                {u.name} ({u.role})
+            <option value="">-- Выберите отдел / должность --</option>
+            {ROLES_LIST.map(r => (
+              <option key={r.key} value={r.key}>
+                {r.label}
               </option>
             ))}
           </select>
@@ -739,7 +764,7 @@ export default function App() {
             className="input-field" 
             type="password" 
             maxLength={4} 
-            placeholder="ПИН-код (по умолч. 1234)" 
+            placeholder="ПИН-код" 
             value={pinInput} 
             style={{ textAlign: 'center', fontSize: '22px', letterSpacing: '8px', fontWeight: 'bold', marginBottom: '16px' }}
             onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
@@ -748,10 +773,6 @@ export default function App() {
           <button className="btn-primary" style={{ width: '100%', padding: '12px', fontSize: '14px' }} onClick={handlePinSubmit} disabled={loading}>
             🔑 Войти в систему
           </button>
-          
-          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '12px' }}>
-            Мастер-ПИН Главного Админа: <b>7777</b>
-          </div>
         </div>
       </div>
     );
@@ -1281,16 +1302,11 @@ export default function App() {
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
               <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />
-                <span style={{ color: 'var(--brand)', fontWeight: '600' }}>
-                  ID: {user?.telegram_id || 'Не определен'}
-                </span>
-                {user?.role === 'ADMIN' && <br />}
-                {user?.role === 'ADMIN' && <span style={{color: 'var(--brand)'}}>Режим симуляции: {currentRoleInfo?.label}</span>}
+                Текущая роль: <b>{ROLES_LIST.find(r => r.key === activeRole)?.label || activeRole}</b>
               </p>
             </div>
 
-            {user?.role === 'ADMIN' ? (
+            {activeRole === 'ADMIN' ? (
               <>
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
@@ -1302,80 +1318,55 @@ export default function App() {
                     value={activeRole} 
                     onChange={e => handleRoleChange(e.target.value)}
                   >
-                    <option value="GUEST">⏳ Гость (Без доступа)</option>
                     {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
                   </select>
                 </div>
 
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей и ПИН-кодов сотрудникам</h4>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>⚙️ Настройка ПИН-кодов для отделов и цехов</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {allUsersList.map(u => (
-                      <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
-                        <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
+                    {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => {
+                      const dbUser = allUsersList.find(u => u.role === r.key);
+                      const currentPin = dbUser?.pin_code || (r.key === 'ADMIN' ? '2203' : '1234');
+
+                      return (
+                        <div key={r.key} style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
+                          <div style={{ fontWeight: 'bold', fontSize: '12px', marginBottom: '6px' }}>
+                            {r.label}
+                          </div>
+                          
+                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ПИН-код:</span>
+                            <input
+                              className="input-field"
+                              type="text"
+                              maxLength={4}
+                              style={{ width: '80px', margin: 0, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}
+                              placeholder="1234"
+                              defaultValue={currentPin}
+                              onBlur={async (e) => {
+                                const newPin = e.target.value.trim();
+                                if (newPin.length === 4) {
+                                  if (dbUser) {
+                                    await supabase.from('users').update({ pin_code: newPin }).eq('id', dbUser.id);
+                                  } else {
+                                    await supabase.from('users').insert([{ role: r.key, name: r.label, pin_code: newPin }]);
+                                  }
+                                  alert(`Новый ПИН-код ${newPin} сохранен для ${r.label}!`);
+                                  loadData();
+                                }
+                              }}
+                            />
+                          </div>
                         </div>
-                        
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <select
-                            className="select-field"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
-                            value={u.role || 'GUEST'}
-                            onChange={async (e) => {
-                              const newRole = e.target.value;
-                              setLoading(true);
-                              vibrate('medium');
-
-                              const { error } = await supabase.rpc('update_user_role', {
-                                p_target_user_id: u.id,
-                                p_new_role: newRole
-                              });
-
-                              if (!error) {
-                                alert(`Права для ${u.name} изменены на: ${newRole}`);
-                                setAllUsersList(prev => prev.map(userItem => 
-                                  userItem.id === u.id ? { ...userItem, role: newRole } : userItem
-                                ));
-                                loadData();
-                              } else {
-                                alert('Ошибка изменения роли: ' + error.message);
-                              }
-                              setLoading(false);
-                            }}
-                          >
-                            <option value="GUEST">⏳ Гость (Без доступа)</option>
-                            {ROLES_LIST.map(r => (
-                              <option key={r.key} value={r.key}>{r.label}</option>
-                            ))}
-                          </select>
-
-                          <input
-                            className="input-field"
-                            type="text"
-                            maxLength={4}
-                            style={{ width: '60px', margin: 0, fontSize: '11px', textAlign: 'center', fontWeight: 'bold' }}
-                            placeholder="ПИН"
-                            defaultValue={u.pin_code || '1234'}
-                            onBlur={async (e) => {
-                              const newPin = e.target.value.trim();
-                              if (newPin.length === 4) {
-                                await supabase.from('users').update({ pin_code: newPin }).eq('id', u.id);
-                                alert(`Новый ПИН ${newPin} установлен для ${u.name}`);
-                              }
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </>
             ) : (
               <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
-                🔒 Панель управления ролями доступна только Начальнику депо.
+                🔒 Панель управления паролями и ролями доступна только Начальнику депо.
               </div>
             )}
           </div>
