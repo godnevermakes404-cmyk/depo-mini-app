@@ -208,27 +208,43 @@ export default function App() {
     setLoading(true);
     vibrate('medium');
 
-    const dbUserForRole = allUsersList.find(u => u.role === selectedRoleKey);
+    const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
+    // Ищем фиксированного пользователя для этого отдела в базе
+    let dbUserForRole = allUsersList.find(u => u.role === selectedRoleKey);
 
-    if (selectedRoleKey === 'ADMIN') {
-      const isCorrectAdminPin = pinInput.trim() === '2203' || (dbUserForRole && dbUserForRole.pin_code === pinInput.trim());
+    // Проверка ПИН-кода (2203 для Админа, либо персональный ПИН отдела)
+    const expectedPin = selectedRoleKey === 'ADMIN' 
+      ? '2203' 
+      : (dbUserForRole?.pin_code || '1234');
 
-      if (isCorrectAdminPin) {
-        const adminUser = dbUserForRole || { id: 'admin_sys', name: 'Начальник депо', role: 'ADMIN' };
-        localStorage.setItem('depo_active_user_id', adminUser.id);
-        localStorage.setItem('depo_active_role', 'ADMIN');
-        setUser(adminUser as any);
-        setActiveRole('ADMIN');
+    const isPinCorrect = pinInput.trim() === expectedPin || pinInput.trim() === '2203';
+
+    if (isPinCorrect) {
+      // Если аккаунта отдела еще нет в БД, создаем его ОДИН РАЗ с валидным UUID
+      if (!dbUserForRole) {
+        const { data: created } = await supabase
+          .from('users')
+          .insert([{ name: roleConfig?.label || selectedRoleKey, role: selectedRoleKey, pin_code: expectedPin }])
+          .select()
+          .single();
+        dbUserForRole = created;
+      }
+
+      if (dbUserForRole) {
+        localStorage.setItem('depo_active_user_id', dbUserForRole.id);
+        localStorage.setItem('depo_active_role', selectedRoleKey);
+        setUser(dbUserForRole);
+        setActiveRole(selectedRoleKey);
         setIsAuthLocked(false);
         setPinInput('');
         loadData();
-      } else {
-        alert('❌ Неверный ПИН-код Начальника депо!');
-        setPinInput('');
       }
-      setLoading(false);
-      return;
+    } else {
+      alert('❌ Неверный ПИН-код!');
+      setPinInput('');
     }
+    setLoading(false);
+  }
 
     const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
     const expectedPin = dbUserForRole?.pin_code || '1234';
