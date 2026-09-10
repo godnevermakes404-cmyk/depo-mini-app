@@ -195,29 +195,46 @@ export default function App() {
     return uuidRegex.test(u.id) ? u.id : null;
   };
 
+  // 1. ИСПРАВЛЕНИЕ: Строгая проверка на готовность
   const isCompletionStatus = (st: string) => {
     if (!st) return false;
-    return st === CASE_STATUS.READY || 
-           st.includes('READY') || 
-           st.includes('DISPATCH') || 
-           st.includes('COMPLETED') ||
-           st.includes('11') ||
-           st.includes('12');
+    return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
   };
 
+  // ============================================================
+  // ПОДПИСКА НА ОНЛАЙН-ОБНОВЛЕНИЯ (С DEBOUNCE И ПОЛНЫМ ПОКРЫТИЕМ)
+  // ============================================================
   useEffect(() => { 
     initAuthAndData(); 
 
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => loadData(), 400); // Debounce 400ms
+    };
+
     const realtimeChannel = supabase.channel('realtime-depo')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, () => loadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, () => loadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_items' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_items' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wagons' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'status_events' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload: any) => {
+        scheduleRefresh();
+        // Обновляем права пользователя на лету, если Админ изменил их
+        if (payload.new && user && payload.new.id === user.id && payload.new.role !== activeRole) {
+          setActiveRole(payload.new.role || 'GUEST');
+          setUser(prev => prev ? { ...prev, role: payload.new.role } : null);
+        }
+      })
       .subscribe();
 
     return () => {
+      if (t) clearTimeout(t);
       supabase.removeChannel(realtimeChannel);
     };
-  }, []);
+  }, [user?.id, activeRole]);
 
   async function initAuthAndData() {
     let savedUserId = localStorage.getItem('depo_saved_user_id');
@@ -348,19 +365,23 @@ export default function App() {
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
   // ============================================================
-  // 🔐 ПРАВА ДОСТУПА (RBAC)
+  // 🔐 УСОВЕРШЕНСТВОВАННЫЕ ПРАВА ДОСТУПА (RBAC)
   // ============================================================
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  const canEditWagonDetails = !isGuest && (isAdminOrOperator || activeRole === 'docs'); 
-  const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
   
-  // Кнопки цеха (Начать/Завершить/Н/Т) доступны Мастеру цеха и ADMIN
+  // Только Оператор и Админ могут менять/присваивать номер вагона
+  const canEditWagonNumber = isAdminOrOperator; 
+  
+  // Документооборот, Оператор и Админ могут менять собственника и вид ремонта
+  const canEditRepairTypeAndOwner = !isGuest && (isAdminOrOperator || activeRole === 'docs');
+  
+  // Право загружать документы (фото, сканы)
+  const canUploadDocs = !isGuest && (isAdminOrOperator || activeRole === 'docs' || activeRole === 'otk');
+
+  const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
   const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
-
-  // Отправлять готовую работу на ДОРАБОТКУ могут Мастер, ADMIN и ОТК
   const canReworkShop = (targetShopKey: string) => canPerformAction(targetShopKey) || activeRole === 'otk';
-
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
   const getAssignedMaster = (shopKey: string) => {
@@ -482,7 +503,7 @@ export default function App() {
   }
 
   async function handleSaveWagonNumber() {
-    if (!selectedCase?.wagons?.id || !editingWagonNum.trim()) return;
+    if (!selectedCase?.wagons?.id || !editingWagonNum.trim() || !canEditWagonNumber) return;
     if (!/^\d{8}$/.test(editingWagonNum.trim())) {
       alert('⚠️ Номер вагона должен состоять ровно из 8 ЦИФР!');
       return;
@@ -529,7 +550,7 @@ export default function App() {
 
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file || !selectedCase || isGuest) return;
+    if (!file || !selectedCase || !canUploadDocs) return;
     
     setLoading(true); vibrate('medium');
     const fileExt = file.name.split('.').pop() || 'jpg';
@@ -566,7 +587,7 @@ export default function App() {
 
   async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file || !selectedCase || isGuest) return;
+    if (!file || !selectedCase || !canUploadDocs) return;
     
     setLoading(true); vibrate('medium');
     const fileExt = file.name.split('.').pop() || 'jpg';
@@ -660,7 +681,7 @@ export default function App() {
   }
 
   async function handleAddDocumentTextOnly() {
-    if (isGuest || !docNumber.trim() || !selectedCase) return;
+    if (!canUploadDocs || !docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
     const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: getValidUserId(user), p_file_url: null });
     if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
@@ -810,7 +831,6 @@ export default function App() {
     }
   }
 
-  // ⏱️ РАСЧЕТ ВРЕМЕНИ БЕЗ НОРМА-ЧАСОВ
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
     const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
@@ -1681,7 +1701,7 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {canEditWagonDetails && (
+            {canEditWagonNumber && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
                 <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
                   {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '✏️ Присвоить реальный 8-значный номер вагона:' : '✏️ Изменить номер вагона:'}
@@ -1717,7 +1737,7 @@ export default function App() {
                     onClick={(e) => e.stopPropagation()}
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     value={selectedCase.repair_type || 'ДР'} 
-                    disabled={!canEditWagonDetails || loading}
+                    disabled={!canEditRepairTypeAndOwner || loading}
                     onChange={async (e) => {
                       const newType = e.target.value;
                       setLoading(true);
@@ -1737,7 +1757,7 @@ export default function App() {
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     type="text" 
                     value={selectedCase.wagons?.owner || ''} 
-                    disabled={!canEditWagonDetails || loading}
+                    disabled={!canEditRepairTypeAndOwner || loading}
                     placeholder="Укажите собственника"
                     onChange={(e) => {
                       const val = e.target.value;
@@ -1757,7 +1777,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* БЛОК ЦЕХОВ */}
             {!isInitialPhase && (
               <div className="premium-card">
                 <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ Этапы ремонта и Ответственные цехов</h4>
@@ -1842,7 +1861,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {!isGuest && (
+                    {canUploadDocs && (
                       <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
                         {hasActPhoto ? '📷 Заменить' : '📷 Загрузить фото'}
                         <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
@@ -1999,7 +2018,7 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  {!isGuest && (
+                  {canUploadDocs && (
                     <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <select 
                         className="select-field" 
