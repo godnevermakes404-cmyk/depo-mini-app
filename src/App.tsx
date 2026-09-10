@@ -93,7 +93,8 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
-  // Состояния серверной авторизации по ПИН-коду
+  // Отдельное модальное окно авторизации
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [loginRole, setLoginRole] = useState<string>('operator');
   const [loginPin, setLoginPin] = useState<string>('');
   const [loginName, setLoginName] = useState<string>('');
@@ -254,6 +255,7 @@ export default function App() {
       setActiveRole(data.role || 'GUEST');
       setLoginPin('');
       setLoginName('');
+      setShowLoginModal(false);
       loadData();
     }
     setLoading(false);
@@ -753,7 +755,7 @@ export default function App() {
       </header>
 
       <div className="content-area">
-        {/* УВЕДОМЛЕНИЕ ДЛЯ ГОСТЯ И ФОРМА АВТОРИЗАЦИИ ПО ПИН-КОДУ ОТДЕЛОВ */}
+        {/* ЧИСТАЯ КАРТОЧКА ГОСТЯ С КНОПКОЙ ОТКРЫТИЯ ОКНА ВХОДА */}
         {isGuest && (
           <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
@@ -761,49 +763,18 @@ export default function App() {
               <div>
                 <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Для работы с вагонами выберите свой отдел и введите персональный PIN-код.
+                  Для работы с вагонами воспользуйтесь входом по ПИН-коду вашего отдела.
                 </div>
               </div>
             </div>
 
-            {/* Безопасная авторизация по серверным ПИН-кодам */}
-            <div style={{ borderTop: '1px dashed var(--border-subtle)', paddingTop: '10px', marginTop: '6px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '6px' }}>🔑 Вход по отделу и PIN-коду:</div>
-              <select
-                className="select-field"
-                style={{ margin: '0 0 6px 0', fontSize: '11px' }}
-                value={loginRole}
-                onChange={e => setLoginRole(e.target.value)}
-              >
-                {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => (
-                  <option key={r.key} value={r.key}>{r.label}</option>
-                ))}
-              </select>
-
-              <input
-                className="input-field"
-                style={{ margin: '0 0 6px 0', fontSize: '11px' }}
-                type="text"
-                placeholder="Ваше имя / Фамилия"
-                value={loginName}
-                onChange={e => setLoginName(e.target.value)}
-              />
-
-              <div style={{ display: 'flex', gap: '6px' }}>
-                <input
-                  className="input-field"
-                  style={{ margin: 0, fontSize: '11px' }}
-                  type="password"
-                  inputMode="numeric"
-                  placeholder="PIN-код"
-                  value={loginPin}
-                  onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
-                />
-                <button className="btn-primary" style={{ width: 'auto', padding: '0 14px', fontSize: '11px' }} onClick={handlePinLogin} disabled={loading}>
-                  Войти
-                </button>
-              </div>
-            </div>
+            <button 
+              className="btn-primary" 
+              style={{ width: '100%', padding: '8px 12px', fontSize: '12px' }} 
+              onClick={() => setShowLoginModal(true)}
+            >
+              🔑 Войти под своим отделом
+            </button>
           </div>
         )}
 
@@ -1310,7 +1281,7 @@ export default function App() {
                   Telegram ID: {user?.telegram_id || 'Не определен'}
                 </span>
               </p>
-              {user && (
+              {user && user.role !== 'GUEST' && (
                 <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', marginTop: '8px', color: 'var(--status-paused)' }} onClick={handleLogout}>
                   Сменить аккаунт / Выйти ✕
                 </button>
@@ -1430,6 +1401,65 @@ export default function App() {
           <span>Профиль</span>
         </button>
       </nav>
+
+      {/* ОТДЕЛЬНОЕ МОДАЛЬНОЕ ОКНО АВТОРИЗАЦИИ ПО ПИН-КОДУ */}
+      {showLoginModal && (
+        <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setShowLoginModal(false); }}>
+          <div className="bottom-sheet" style={{ maxWidth: '400px', margin: 'auto', borderRadius: '16px', padding: '20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', color: 'var(--brand)' }}>🔑 Вход в систему ДЕПО TMS</h3>
+              <button onClick={() => setShowLoginModal(false)} style={{ background: 'transparent', border: 'none', fontSize: '18px', cursor: 'pointer' }}>✕</button>
+            </div>
+            
+            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
+              Выберите отдел, укажите имя и введите персональный PIN-код.
+            </p>
+
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Отдел / Должность:</label>
+            <select
+              className="select-field"
+              style={{ marginTop: '4px', marginBottom: '10px', fontSize: '12px' }}
+              value={loginRole}
+              onChange={e => setLoginRole(e.target.value)}
+            >
+              {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => (
+                <option key={r.key} value={r.key}>{r.label}</option>
+              ))}
+            </select>
+
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ваше имя и фамилия:</label>
+            <input
+              className="input-field"
+              style={{ marginTop: '4px', marginBottom: '10px', fontSize: '12px' }}
+              type="text"
+              placeholder="Иван Иванов"
+              value={loginName}
+              onChange={e => setLoginName(e.target.value)}
+            />
+
+            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>PIN-код доступа:</label>
+            <input
+              className="input-field"
+              style={{ marginTop: '4px', marginBottom: '16px', fontSize: '18px', textAlign: 'center', letterSpacing: '6px', fontWeight: 'bold' }}
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="****"
+              value={loginPin}
+              onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
+            />
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setShowLoginModal(false)}>
+                Отмена
+              </button>
+              <button className="btn-primary" style={{ flex: 1.5 }} onClick={handlePinLogin} disabled={loading}>
+                {loading ? 'Проверка...' : 'Войти'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА */}
       {!isGuest && showStockAdjustModal && adjustingItem && (
