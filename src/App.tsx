@@ -366,8 +366,8 @@ export default function App() {
   // Управление глобальным статусом вагона (В ремонт, Готов, Задержан)
   const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
   
-  // Кнопки конкретного цеха могут нажимать ТОЛЬКО мастер этого цеха, Админ или Оператор (ОТК не имеет доступа!)
-  const canPerformAction = (targetShopKey: string) => !isGuest && (isAdminOrOperator || activeRole === targetShopKey);
+  // Кнопки цеха доступны ТОЛЬКО Мастеру этого цеха и Начальнику депо (ADMIN)
+const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
   
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
