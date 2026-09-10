@@ -265,7 +265,6 @@ export default function App() {
   
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  // Права управления статусами и цехами: Админ, Диспетчер и ОТК!
   const canManageStatus = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator' || activeRole === 'otk');
   const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
@@ -680,9 +679,9 @@ export default function App() {
   const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
-  // Если вагон уже готовый или в ремонте — разрешаем ОТК/Админу отправлять обратно на доработку в статус IN_REPAIR
+  // СОХРАНЯЕМ И ОСНОВНОЙ СЛЕДУЮЩИЙ ШАГ, И ВОЗМОЖНОСТЬ ВЕРНУТЬ В РЕМОНТ/ЗАДЕРЖКУ!
   const baseTransitions = selectedCase?.current_status === CASE_STATUS.READY
-    ? [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]
+    ? Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]))
     : availableTransitions;
 
   const visibleTransitions = isGuest ? [] : (
