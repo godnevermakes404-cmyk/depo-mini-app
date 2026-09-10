@@ -265,7 +265,9 @@ export default function App() {
   
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  const canPerformAction = (targetShopKey: string) => !isGuest && (isAdminOrOperator || activeRole === targetShopKey);
+  // Права управления статусами и цехами: Админ, Диспетчер и ОТК!
+  const canManageStatus = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator' || activeRole === 'otk');
+  const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
@@ -504,7 +506,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Подпись или пропуск (Н/Т) в Акте ВУ-22
   async function handleSignAct(shopKey: string, isNotRequired: boolean = false) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true); vibrate('medium');
@@ -679,10 +680,15 @@ export default function App() {
   const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
+  // Если вагон уже готовый или в ремонте — разрешаем ОТК/Админу отправлять обратно на доработку в статус IN_REPAIR
+  const baseTransitions = selectedCase?.current_status === CASE_STATUS.READY
+    ? [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]
+    : availableTransitions;
+
   const visibleTransitions = isGuest ? [] : (
     isPausedState 
       ? (canResumeFromPause ? availableTransitions : [])
-      : (isAdminOrOperator ? availableTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED))
+      : (canManageStatus ? baseTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED))
   );
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
@@ -1593,9 +1599,23 @@ export default function App() {
                         </div>
                         <div>
                           {isDone ? (
-                            <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                              {canEdit && (
+                                <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '9px', color: 'var(--status-paused)' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
+                                  ↺ Доработка
+                                </button>
+                              )}
+                            </div>
                           ) : isNotRequired ? (
-                            <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold', fontSize: '10px' }}>— Не требуется</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold', fontSize: '10px' }}>— Не требуется</span>
+                              {canEdit && (
+                                <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '9px' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
+                                  В работу
+                                </button>
+                              )}
+                            </div>
                           ) : isInProgress ? (
                             canEdit ? (
                               <div style={{ display: 'flex', gap: '4px' }}>
