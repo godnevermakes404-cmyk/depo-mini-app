@@ -154,7 +154,8 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  const [arrivalCount, setArrivalCount] = useState<number>(1);
+  // Исправлено: значение в формате string для свободной очистки ввода
+  const [arrivalCount, setArrivalCount] = useState<string>('1');
   const [editingWagonNum, setEditingWagonNum] = useState<string>('');
 
   const [track, setTrack] = useState('Путь 1');
@@ -164,7 +165,6 @@ export default function App() {
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
   };
 
-  // Валидатор UUID: отсекает невалидные тексты, предотвращая синтаксическую ошибку базы
   const getValidUserId = (u: any) => {
     if (!u?.id) return null;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -210,7 +210,6 @@ export default function App() {
 
     const dbUserForRole = allUsersList.find(u => u.role === selectedRoleKey);
 
-    // 1. Начальник депо — вход по паролю 2203
     if (selectedRoleKey === 'ADMIN') {
       const isCorrectAdminPin = pinInput.trim() === '2203' || (dbUserForRole && dbUserForRole.pin_code === pinInput.trim());
 
@@ -231,7 +230,6 @@ export default function App() {
       return;
     }
 
-    // 2. Вход для остальных цехов и отделов
     const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
     const expectedPin = dbUserForRole?.pin_code || '1234';
 
@@ -399,19 +397,20 @@ export default function App() {
 
   async function handleKppArrival() {
     if (isGuest) return;
-    if (arrivalCount <= 0) { alert('Укажите количество вагонов!'); return; }
+    const countNum = Number(arrivalCount);
+    if (isNaN(countNum) || countNum <= 0) { alert('Укажите корректное количество вагонов!'); return; }
 
     setLoading(true); vibrate('medium');
     const { error } = await supabase.rpc('register_kpp_arrival', {
-      p_count: arrivalCount,
+      p_count: countNum,
       p_user_id: getValidUserId(user)
     });
 
     if (!error) {
       notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон');
-      alert(`Успешно принято ${arrivalCount} вагонов с КПП! Оператор может внести их реальные номера.`);
+      alert(`Успешно принято ${countNum} вагонов с КПП! Оператор может внести их реальные номера.`);
       setShowAddModal(false);
-      setArrivalCount(1);
+      setArrivalCount('1');
       loadData();
     } else {
       alert('Ошибка приёма вагонов с КПП: ' + error.message);
@@ -1311,8 +1310,26 @@ export default function App() {
               </p>
             </div>
 
-            {activeRole === 'ADMIN' ? (
+            {/* Панель симуляции и управления ролями привязана к исходной роли user.role */}
+            {user?.role === 'ADMIN' ? (
               <>
+                {activeRole !== 'ADMIN' && (
+                  <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--status-queue)' }}>
+                        ⚠️ Режим тестирования другой роли
+                      </span>
+                      <button 
+                        className="btn-primary" 
+                        style={{ padding: '4px 8px', fontSize: '10px', width: 'auto' }}
+                        onClick={() => handleRoleChange('ADMIN')}
+                      >
+                        👑 Вернуть Админа
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Переключение режима роли (Тестирование)</h4>
                   <select 
@@ -1502,7 +1519,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Модалка: ПРОСТОЙ ВВОД КОЛИЧЕСТВА НА КПП */}
+      {/* Модалка: ВВОД КОЛИЧЕСТВА НА КПП */}
       {!isGuest && showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -1519,13 +1536,13 @@ export default function App() {
               min={1} 
               max={100} 
               value={arrivalCount} 
-              onChange={e => setArrivalCount(Math.max(1, Number(e.target.value) || 1))} 
+              onChange={e => setArrivalCount(e.target.value)} 
             />
 
             <div style={{ display: 'flex', gap: '6px', marginTop: '16px' }}>
               <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
               <button className="btn-primary" onClick={handleKppArrival} disabled={loading}>
-                Зарегистрировать ({arrivalCount} ваг.)
+                Зарегистрировать ({arrivalCount || '0'} ваг.)
               </button>
             </div>
           </div>
