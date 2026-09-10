@@ -86,6 +86,34 @@ const ROLES_LIST = [
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
+// ============================================================
+// 🔐 ХЕЛПЕРЫ ДЛЯ ХРАНЕНИЯ СЕССИИ
+// ============================================================
+function readCloudStorage(key: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const cloud = window.Telegram?.WebApp?.CloudStorage;
+      if (!cloud) { resolve(null); return; }
+      cloud.getItem(key, (err: any, value: string) => {
+        if (err || !value) resolve(null);
+        else resolve(value);
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+
+function saveSession(userId: string) {
+  try { localStorage.setItem('depo_saved_user_id', userId); } catch (e) {}
+  try { window.Telegram?.WebApp?.CloudStorage?.setItem('depo_saved_user_id', userId, () => {}); } catch (e) {}
+}
+
+function clearSession() {
+  try { localStorage.removeItem('depo_saved_user_id'); } catch (e) {}
+  try { window.Telegram?.WebApp?.CloudStorage?.removeItem('depo_saved_user_id', () => {}); } catch (e) {}
+}
+
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
@@ -171,7 +199,6 @@ export default function App() {
     return uuidRegex.test(u.id) ? u.id : null;
   };
 
-  // Проверка статусов завершения ремонта / готовности / отправки
   const isCompletionStatus = (st: string) => {
     if (!st) return false;
     return st === CASE_STATUS.READY || 
@@ -182,44 +209,66 @@ export default function App() {
            st.includes('12');
   };
 
-  useEffect(() => { initAuthAndData(); }, []);
+  // ============================================================
+  // ПОДПИСКА НА ОНЛАЙН-ОБНОВЛЕНИЯ И ИНИЦИАЛИЗАЦИЯ
+  // ============================================================
+  useEffect(() => { 
+    initAuthAndData(); 
+
+    // Включаем Realtime (Мгновенное обновление данных у всех пользователей)
+    const realtimeChannel = supabase.channel('realtime-depo')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, () => loadData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_items' }, () => loadData())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(realtimeChannel);
+    };
+  }, []);
 
   async function initAuthAndData() {
-    const savedUserId = localStorage.getItem('depo_saved_user_id');
-    if (savedUserId) {
-      const { data: savedDbUser } = await supabase.from('users').select('*').eq('id', savedUserId).maybeSingle();
-      if (savedDbUser) {
-        setUser(savedDbUser);
-        setActiveRole(savedDbUser.role || 'GUEST');
-        loadData();
-        return;
-      }
-    }
+    let savedUserId = localStorage.getItem('depo_saved_user_id');
 
-    let tgUser: any = null;
     try {
       const tg = window.Telegram?.WebApp;
       if (tg) {
         tg.ready();
         tg.expand();
         tg.setHeaderColor?.('bg_main');
+      }
+    } catch (e) {}
 
-        if (tg.initDataUnsafe?.user?.id) {
-          tgUser = tg.initDataUnsafe.user;
-        } else if (tg.initData) {
-          const params = new URLSearchParams(tg.initData);
-          const userJson = params.get('user');
-          if (userJson) tgUser = JSON.parse(userJson);
-        } else if (window.location.hash) {
-          const hashRaw = window.location.hash.replace('#', '');
-          const hashParams = new URLSearchParams(hashRaw);
-          const tgWebAppData = hashParams.get('tgWebAppData');
-          if (tgWebAppData) {
-            const innerParams = new URLSearchParams(tgWebAppData);
-            const userJson = innerParams.get('user');
-            if (userJson) tgUser = JSON.parse(userJson);
-          }
-        }
+    if (!savedUserId) {
+      const cloudId = await readCloudStorage('depo_saved_user_id');
+      if (cloudId) {
+        savedUserId = cloudId;
+        try { localStorage.setItem('depo_saved_user_id', cloudId); } catch (e) {}
+      }
+    }
+
+    if (savedUserId) {
+      const { data: savedDbUser } = await supabase.from('users').select('*').eq('id', savedUserId).maybeSingle();
+      if (savedDbUser) {
+        setUser(savedDbUser);
+        setActiveRole(savedDbUser.role || 'GUEST');
+        saveSession(savedDbUser.id);
+        loadData();
+        return;
+      } else {
+        clearSession();
+      }
+    }
+
+    let tgUser: any = null;
+    try {
+      const tg = window.Telegram?.WebApp;
+      if (tg?.initDataUnsafe?.user?.id) {
+        tgUser = tg.initDataUnsafe.user;
+      } else if (tg?.initData) {
+        const params = new URLSearchParams(tg.initData);
+        const userJson = params.get('user');
+        if (userJson) tgUser = JSON.parse(userJson);
       }
     } catch (e) {}
 
@@ -229,7 +278,7 @@ export default function App() {
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
-        localStorage.setItem('depo_saved_user_id', dbUser.id);
+        saveSession(dbUser.id);
         setUser(dbUser); 
         setActiveRole(dbUser.role || 'GUEST');
       } else {
@@ -260,7 +309,7 @@ export default function App() {
     if (error || !data) {
       alert('❌ Неверный PIN-код для выбранного отдела!');
     } else {
-      localStorage.setItem('depo_saved_user_id', data.id);
+      saveSession(data.id);
       setUser(data);
       setActiveRole(data.role || 'GUEST');
       setLoginPin('');
@@ -271,7 +320,7 @@ export default function App() {
   }
 
   function handleLogout() {
-    localStorage.removeItem('depo_saved_user_id');
+    clearSession();
     setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
     setActiveRole('GUEST');
   }
@@ -308,6 +357,9 @@ export default function App() {
   
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
+  // ДОБАВЛЕНО ПРАВО РЕДАКТИРОВАНИЯ ТИПА РЕМОНТА ДЛЯ ДОКУМЕНТООБОРОТА
+  const canEditWagonDetails = isAdminOrOperator || activeRole === 'docs'; 
+  
   const canManageStatus = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator' || activeRole === 'otk');
   const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
@@ -610,7 +662,6 @@ export default function App() {
   async function handleUpdateStatus(newStatus: string) {
     if (isGuest || !selectedCase) return;
     
-    // Блокировка на уровне функций если пытаются завершить без справок
     if (isCompletionStatus(newStatus) && !hasCompletionDocs) {
       alert('⚠️ Действие заблокировано: Для перевода вагона прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М)!');
       return;
@@ -816,6 +867,7 @@ export default function App() {
                 placeholder="****"
                 value={loginPin}
                 onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={e => { if (e.key === 'Enter') handlePinLogin(); }}
               />
             </div>
 
@@ -1668,7 +1720,7 @@ export default function App() {
                     onClick={(e) => e.stopPropagation()}
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     value={selectedCase.repair_type || 'ДР'} 
-                    disabled={!isAdminOrOperator || loading}
+                    disabled={!canEditWagonDetails || loading}
                     onChange={async (e) => {
                       const newType = e.target.value;
                       setLoading(true);
@@ -1688,7 +1740,7 @@ export default function App() {
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     type="text" 
                     value={selectedCase.wagons?.owner || ''} 
-                    disabled={!isAdminOrOperator || loading}
+                    disabled={!canEditWagonDetails || loading}
                     placeholder="Укажите собственника"
                     onChange={(e) => {
                       const val = e.target.value;
@@ -1791,7 +1843,7 @@ export default function App() {
                     {!isGuest && (
                       <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
                         {hasActPhoto ? '📷 Заменить' : '📷 Загрузить фото'}
-                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
                       </label>
                     )}
                   </div>
@@ -1962,7 +2014,7 @@ export default function App() {
                       <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px' }} onClick={handleAddDocumentTextOnly} disabled={loading}>Текст</button>
                       <label className="btn-primary" style={{ width: 'auto', padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
                         📷
-                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
+                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
                       </label>
                     </div>
                   )}
