@@ -165,37 +165,42 @@ export default function App() {
   async function initAuthAndData() {
     let tg: any = null;
     let tgUser: any = null;
+
     try {
       tg = window.Telegram?.WebApp || WebApp;
-      if (tg) { 
-        tg.ready(); 
-        tg.expand(); 
-        tg.setHeaderColor?.('bg_main'); 
-        tgUser = tg.initDataUnsafe?.user; 
+      if (tg) {
+        tg.ready();
+        tg.expand();
+        tg.setHeaderColor?.('bg_main');
+        
+        // 1. Пробуем стандартный объект
+        tgUser = tg.initDataUnsafe?.user;
+
+        // 2. Если пустой (баг ПК) — распарсиваем сырую строку initData
+        if (!tgUser && tg.initData) {
+          const searchParams = new URLSearchParams(tg.initData);
+          const userJson = searchParams.get('user');
+          if (userJson) {
+            tgUser = JSON.parse(userJson);
+          }
+        }
       }
-    } catch (e) {}
-
-    const hasTgContext = Boolean(window.Telegram?.WebApp) || Boolean(tg?.initData);
-
-    if (!hasTgContext && !tgUser) { 
-      setIsOutsideTelegram(true); 
-      return; 
+    } catch (e) {
+      console.error('Telegram WebApp Error:', e);
     }
 
-    setIsOutsideTelegram(false);
-
     if (tgUser?.id) {
+      setIsOutsideTelegram(false);
       const tgIdStr = String(tgUser.id);
       const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
       const username = tgUser.username?.toLowerCase() || '';
 
-      // Единственный Администратор депо по юзернейму @ryme_1
+      // Авто-выдача ADMIN для @ryme_1
       const isOwnerAdmin = username === 'ryme_1';
 
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
-        // Автоматически назначаем ADMIN для ryme_1, если в БД записался GUEST
         if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
           await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
           dbUser.role = 'ADMIN';
@@ -213,13 +218,15 @@ export default function App() {
         setUser(newUser || { id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
         setActiveRole(targetRole);
       }
+      loadData();
     } else {
+      // Если даже после парсинга Telegram не дал ID
       setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
       setActiveRole('GUEST');
+      loadData();
     }
-    loadData();
   }
-
+  
   async function loadData() {
     const { data: repairData } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
