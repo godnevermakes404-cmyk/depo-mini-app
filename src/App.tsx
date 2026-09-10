@@ -200,19 +200,17 @@ export default function App() {
     return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
   };
 
-  // 1. Авторизация (выполняется 1 раз при старте приложения)
   useEffect(() => { 
     initAuthAndData(); 
   }, []);
 
-  // 2. Подписка Realtime (работает без сброса активной роли при переключении тестов)
   useEffect(() => { 
     if (!user?.id) return;
 
     let t: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefresh = () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => loadData(), 400); // Debounce 400ms
+      t = setTimeout(() => loadData(), 400);
     };
 
     const realtimeChannel = supabase.channel('realtime-depo')
@@ -681,7 +679,14 @@ export default function App() {
 
   async function handleUpdateStatus(newStatus: string) {
     if (isGuest || !selectedCase) return;
-    
+
+    // ПРОВЕРКА 1: Проверяем, что ВСЕ цеха завершили работу (или Н/Т), прежде чем передавать вагон дальше
+    if (newStatus !== CASE_STATUS.PAUSED && !allShopsCompleted) {
+      alert('⚠️ Перевод заблокирован! Все цеха должны завершить работу или поставить «Н/Т».');
+      return;
+    }
+
+    // ПРОВЕРКА 2: Наличие документов при завершении ремонта
     if (isCompletionStatus(newStatus) && !hasCompletionDocs) {
       alert('⚠️ Действие заблокировано: Для перевода вагона прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М)!');
       return;
@@ -785,6 +790,12 @@ export default function App() {
   
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
+
+  // Проверка завершения работ абсолютно всеми цехами
+  const allShopsCompleted = selectedCase?.shop_progress && DEFAULT_SHOPS.every(s => {
+    const prog = selectedCase.shop_progress[s.key];
+    return prog?.status === 'DONE' || prog?.status === 'NOT_REQUIRED';
+  });
   
   const hasCompletionDocs = documents.some(d => 
     d.doc_type?.includes('ВУ-23') || 
@@ -1961,6 +1972,12 @@ export default function App() {
                       <h4 style={{ margin: 0, fontSize: '12px' }}>Допустимые действия:</h4>
                     </div>
 
+                    {!allShopsCompleted && (
+                      <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
+                        ⚠️ Все цеха должны завершить работу (или поставить «Н/Т») перед сменной статуса.
+                      </div>
+                    )}
+
                     {!hasCompletionDocs && (
                       <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
                         ⚠️ Для перевода в готовность/отправку прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
@@ -1970,7 +1987,11 @@ export default function App() {
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {visibleTransitions.map((st: string) => {
                         const isTargetReady = isCompletionStatus(st);
-                        const isDisabled = loading || (isTargetReady && !hasCompletionDocs);
+                        const isPause = st === CASE_STATUS.PAUSED;
+                        
+                        // Запрещаем смену статуса дальше, пока не готовы ВСЕ цеха (кроме установки задержки)
+                        const isBlockedByShops = !isPause && !allShopsCompleted;
+                        const isDisabled = loading || (isTargetReady && !hasCompletionDocs) || isBlockedByShops;
 
                         return (
                           <button 
