@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import WebApp from '@twa-dev/sdk';
 import { supabase } from './supabase';
 import { 
   STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
