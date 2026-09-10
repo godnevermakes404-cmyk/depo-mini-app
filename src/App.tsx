@@ -13,8 +13,6 @@ import './App.css';
 
 declare global { interface Window { Telegram: any; } }
 
-const IS_DEV = import.meta.env.DEV;
-
 type AppTab = 'home' | 'wagons' | 'warehouse' | 'analytics' | 'profile';
 
 export const CASE_STATUS = {
@@ -115,10 +113,12 @@ function clearSession() {
 
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
+  
+  // Состояние для тестовой роли
   const [testRole, setTestRole] = useState<string | null>(null);
   
-  // В ПРОДАКШЕНЕ activeRole СТРОГО РАВЕН user.role ИЗ БАЗЫ ДАННЫХ
-  const activeRole = (IS_DEV && testRole) ? testRole : (user?.role || 'GUEST');
+  // Если пользователь реально ADMIN, разрешаем применять testRole. Иначе строго user.role
+  const activeRole = (user?.role === 'ADMIN' && testRole) ? testRole : (user?.role || 'GUEST');
 
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -315,6 +315,7 @@ export default function App() {
     } else {
       saveSession(data.id);
       setUser(data);
+      setTestRole(null); // Сбрасываем тестовую роль при новом логине
       setLoginPin('');
       setLoginName('');
       loadData();
@@ -325,6 +326,7 @@ export default function App() {
   function handleLogout() {
     clearSession();
     setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+    setTestRole(null);
   }
 
   async function loadData() {
@@ -356,7 +358,7 @@ export default function App() {
   };
 
   async function handleRoleChange(newRole: string) { 
-    if (IS_DEV) {
+    if (user?.role === 'ADMIN') {
       setTestRole(newRole); 
       vibrate('medium'); 
     }
@@ -1430,92 +1432,108 @@ export default function App() {
               )}
             </div>
 
-            {/* Панель переключения ролей доступна ТОЛЬКО при локальной разработке (IS_DEV) */}
-            {IS_DEV && user?.role === 'ADMIN' && (
-              <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>
-                  🧪 Переключение режима роли (ТОЛЬКО DEV)
-                </h4>
-                <select 
-                  className="select-field" 
-                  style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
-                  value={activeRole} 
-                  onChange={e => handleRoleChange(e.target.value)}
-                >
-                  {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
-                </select>
-              </div>
-            )}
-
             {user?.role === 'ADMIN' ? (
-              <div className="premium-card">
-                <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  {allUsersList.map(u => (
-                    <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
-                      <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                        <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <select
-                          className="select-field"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
-                          value={u.role || 'GUEST'}
-                          onChange={async (e) => {
-                            const newRole = e.target.value;
-                            setLoading(true);
-                            vibrate('medium');
-
-                            const { error } = await supabase.rpc('update_user_role', {
-                              p_target_user_id: u.id,
-                              p_new_role: newRole,
-                              p_user_id: getValidUserId(user)
-                            });
-
-                            if (!error) {
-                              alert(`Права для ${u.name} изменены на: ${newRole}`);
-                              setAllUsersList(prev => prev.map(userItem => 
-                                userItem.id === u.id ? { ...userItem, role: newRole } : userItem
-                              ));
-                              loadData();
-                            } else {
-                              alert('Ошибка изменения роли: ' + error.message);
-                            }
-                            setLoading(false);
-                          }}
-                        >
-                          {ROLES_LIST.map(r => (
-                            <option key={r.key} value={r.key}>{r.label}</option>
-                          ))}
-                        </select>
-
-                        <button
-                          className="btn-secondary"
-                          style={{ padding: '0 8px', fontSize: '11px', color: 'var(--status-paused)', width: 'auto' }}
-                          onClick={async () => {
-                            if (!window.confirm(`Удалить профиль "${u.name}" (${u.role})?`)) return;
-                            setLoading(true);
-                            vibrate('heavy');
-                            const { error } = await supabase.from('users').delete().eq('id', u.id);
-                            if (!error) {
-                              setAllUsersList(prev => prev.filter(item => item.id !== u.id));
-                            } else {
-                              alert('Ошибка удаления: ' + error.message);
-                            }
-                            setLoading(false);
-                          }}
-                        >
-                          🗑️
-                        </button>
-                      </div>
+              <>
+                {activeRole !== 'ADMIN' && (
+                  <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--status-queue)' }}>
+                        ⚠️ Режим тестирования другой роли
+                      </span>
+                      <button 
+                        className="btn-primary" 
+                        style={{ padding: '4px 8px', fontSize: '10px', width: 'auto' }}
+                        onClick={() => handleRoleChange('ADMIN')}
+                      >
+                        👑 Вернуть Админа
+                      </button>
                     </div>
-                  ))}
+                  </div>
+                )}
+
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Переключение режима роли (Тестирование)</h4>
+                  <select 
+                    className="select-field" 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
+                    value={activeRole} 
+                    onChange={e => handleRoleChange(e.target.value)}
+                  >
+                    {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+                  </select>
                 </div>
-              </div>
+
+                <div className="premium-card">
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {allUsersList.map(u => (
+                      <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
+                        <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
+                        </div>
+                        
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <select
+                            className="select-field"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
+                            value={u.role || 'GUEST'}
+                            onChange={async (e) => {
+                              const newRole = e.target.value;
+                              setLoading(true);
+                              vibrate('medium');
+
+                              const { error } = await supabase.rpc('update_user_role', {
+                                p_target_user_id: u.id,
+                                p_new_role: newRole,
+                                p_user_id: getValidUserId(user)
+                              });
+
+                              if (!error) {
+                                alert(`Права для ${u.name} изменены на: ${newRole}`);
+                                setAllUsersList(prev => prev.map(userItem => 
+                                  userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                                ));
+                                loadData();
+                              } else {
+                                alert('Ошибка изменения роли: ' + error.message);
+                              }
+                              setLoading(false);
+                            }}
+                          >
+                            {ROLES_LIST.map(r => (
+                              <option key={r.key} value={r.key}>{r.label}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '0 8px', fontSize: '11px', color: 'var(--status-paused)', width: 'auto' }}
+                            onClick={async () => {
+                              if (!window.confirm(`Удалить профиль "${u.name}" (${u.role})?`)) return;
+                              setLoading(true);
+                              vibrate('heavy');
+                              const { error } = await supabase.from('users').delete().eq('id', u.id);
+                              if (!error) {
+                                setAllUsersList(prev => prev.filter(item => item.id !== u.id));
+                              } else {
+                                alert('Ошибка удаления: ' + error.message);
+                              }
+                              setLoading(false);
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
             ) : (
               <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
                 🔒 Панель управления ролями доступна только Начальнику депо.
@@ -1976,6 +1994,7 @@ export default function App() {
                         const isTargetReady = isCompletionStatus(st);
                         const isPause = st === CASE_STATUS.PAUSED;
                         
+                        // Запрещаем смену статуса дальше, пока не готовы ВСЕ цеха (кроме установки задержки)
                         const isBlockedByShops = !isPause && !allShopsCompleted;
                         const isDisabled = loading || (isTargetReady && !hasCompletionDocs) || isBlockedByShops;
 
