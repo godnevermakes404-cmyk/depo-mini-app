@@ -610,9 +610,30 @@ export default function App() {
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
 
-  // РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
+  // 🎯 ЛОГИКА СНЯТИЯ СИГНАЛА ЗАДЕРЖКИ
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
-  const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator';
+  
+  // 1. Ищем автора паузы в журнале событий
+  const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
+  const isPauseAuthor = Boolean(
+    lastPauseEvent && (
+      lastPauseEvent.user_id === user?.id || 
+      (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)
+    )
+  );
+
+  // 2. Ищем ответственную роль по категории задержки
+  const activeDelay = delayLogs.find(d => d.repair_id === selectedCase?.repair_id && !d.end_datetime);
+  const isDelayResponsible = Boolean(
+    activeDelay && (
+      (activeDelay.category === 'Materials' && activeRole === 'procurement') ||
+      (activeDelay.category === 'Equipment' && activeRole === 'mechanic') ||
+      (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))
+    )
+  );
+
+  // Права на снятие задержки: Админ, ОТК, Диспетчер, Автор задержки или Ответственный за проблему
+  const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
   const visibleTransitions = isGuest ? [] : (
     isPausedState 
@@ -868,7 +889,7 @@ export default function App() {
               <div className="filters-grid">
                 <select 
                   className="select-field" 
-                  onTouchStart={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   value={statusFilter || ''} 
                   onChange={e => setStatusFilter(e.target.value || null)}
@@ -882,7 +903,7 @@ export default function App() {
 
                 <select 
                   className="select-field" 
-                  onTouchStart={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
                   value={repairTypeFilter || ''} 
                   onChange={e => setRepairTypeFilter(e.target.value || null)}
@@ -897,7 +918,7 @@ export default function App() {
 
               <select 
                 className="select-field" 
-                onTouchStart={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
                 value={delayCategoryFilter || ''} 
                 onChange={e => setDelayCategoryFilter(e.target.value || null)}
@@ -993,7 +1014,7 @@ export default function App() {
 
               <select 
                 className="select-field" 
-                onTouchStart={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
                 value={warehouseCatFilter || ''} 
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
@@ -1166,7 +1187,7 @@ export default function App() {
                   <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
                   <select 
                     className="select-field" 
-                    onTouchStart={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                     style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
                     value={activeRole} 
@@ -1188,7 +1209,7 @@ export default function App() {
                         </div>
                         <select
                           className="select-field"
-                          onTouchStart={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                           style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
                           value={u.role || 'GUEST'}
@@ -1340,7 +1361,7 @@ export default function App() {
             <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Цех / Категория:</label>
             <select 
               className="select-field" 
-              onTouchStart={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               style={{ marginTop: '2px' }} 
               value={itemCategory} 
@@ -1458,7 +1479,7 @@ export default function App() {
                   <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
                   <select 
                     className="select-field" 
-                    onTouchStart={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                     style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
                     value={selectedCase.repair_type || 'ДР'} 
@@ -1603,7 +1624,7 @@ export default function App() {
                       <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
                         <select 
                           className="select-field" 
-                          onTouchStart={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                           style={{ margin: 0 }} 
                           value={track} 
@@ -1615,7 +1636,7 @@ export default function App() {
 
                         <select 
                           className="select-field" 
-                          onTouchStart={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
                           onClick={(e) => e.stopPropagation()}
                           style={{ margin: 0 }} 
                           value={position} 
@@ -1673,7 +1694,7 @@ export default function App() {
                     <div style={{ display: 'flex', gap: '6px' }}>
                       <select 
                         className="select-field" 
-                        onTouchStart={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
                         onClick={(e) => e.stopPropagation()}
                         style={{ margin: 0, flex: 1.2 }} 
                         value={docType} 
@@ -1724,7 +1745,7 @@ export default function App() {
             
             <select 
               className="select-field" 
-              onTouchStart={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               value={delayType} 
               onChange={e => setDelayType(e.target.value as any)}
@@ -1735,7 +1756,7 @@ export default function App() {
             
             <select 
               className="select-field" 
-              onTouchStart={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               value={delayCategory} 
               onChange={e => {

@@ -383,3 +383,9 @@ body {
   position: relative;
   z-index: 10;
 }
+.select-field {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto !important;
+  cursor: pointer;
+}
