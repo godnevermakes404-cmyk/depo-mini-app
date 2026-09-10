@@ -259,7 +259,6 @@ export default function App() {
   const isGuest = activeRole === 'GUEST';
   const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
-  const isAdminOrDocs = !isGuest && (activeRole === 'ADMIN' || activeRole === 'docs');
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
 
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
