@@ -189,12 +189,13 @@ export default function App() {
       const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
       const username = tgUser.username?.toLowerCase() || '';
 
-      // Проверка на владельца: только @ryme_1 заходит как ADMIN
+      // Единственный Администратор депо по юзернейму @ryme_1
       const isOwnerAdmin = username === 'ryme_1';
 
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
+        // Автоматически назначаем ADMIN для ryme_1, если в БД записался GUEST
         if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
           await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
           dbUser.role = 'ADMIN';
@@ -209,13 +210,8 @@ export default function App() {
           .select()
           .single();
 
-        if (newUser) {
-          setUser(newUser);
-          setActiveRole(targetRole);
-        } else {
-          setUser({ id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
-          setActiveRole(targetRole);
-        }
+        setUser(newUser || { id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
+        setActiveRole(targetRole);
       }
     } else {
       setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
@@ -1225,8 +1221,11 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                Роль в БД: <b>{user?.role || 'GUEST'}</b> 
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                Роль в БД: <b>{user?.role || 'GUEST'}</b> <br />
+                <span style={{ color: 'var(--brand)', fontWeight: '600' }}>
+                  ID: {user?.telegram_id || 'Не определен'}
+                </span>
                 {user?.role === 'ADMIN' && <br />}
                 {user?.role === 'ADMIN' && <span style={{color: 'var(--brand)'}}>Режим симуляции: {currentRoleInfo?.label}</span>}
               </p>
@@ -1316,7 +1315,7 @@ export default function App() {
           <span>Вагоны</span>
         </button>
         <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
           <span>Склад</span>
         </button>
         <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}>
