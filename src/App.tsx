@@ -46,7 +46,7 @@ interface DelayLog {
 }
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
-interface UserRecord { id: string; name: string; role: string; telegram_id: string; created_at?: string; }
+interface UserRecord { id: string; name: string; role: string; telegram_id: string; pin_code?: string; created_at?: string; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
@@ -92,6 +92,11 @@ export default function App() {
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
+
+  // Состояния авторизации по ПИН
+  const [isAuthLocked, setIsAuthLocked] = useState<boolean>(true);
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [pinInput, setPinInput] = useState<string>('');
 
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -140,7 +145,6 @@ export default function App() {
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
   const [docNumber, setDocNumber] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
 
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
@@ -163,84 +167,72 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
-    let tgUser: any = null;
+    // Загружаем список всех пользователей из БД для экрана входа
+    const { data: usersList } = await supabase.from('users').select('*').order('name', { ascending: true });
+    if (usersList) setAllUsersList(usersList as UserRecord[]);
 
-    try {
-      const tg = window.Telegram?.WebApp || WebApp;
-      if (tg) {
-        tg.ready();
-        tg.expand();
-        tg.setHeaderColor?.('bg_main');
-
-        // 1. Прямой объект Telegram SDK
-        if (tg.initDataUnsafe?.user?.id) {
-          tgUser = tg.initDataUnsafe.user;
-        }
-
-        // 2. Строка initData
-        if (!tgUser && tg.initData) {
-          const params = new URLSearchParams(tg.initData);
-          const userJson = params.get('user');
-          if (userJson) tgUser = JSON.parse(userJson);
-        }
-
-        // 3. Парсинг Hash URL (специально для Telegram Desktop)
-        if (!tgUser && window.location.hash) {
-          const hashRaw = window.location.hash.replace('#', '');
-          const hashParams = new URLSearchParams(hashRaw);
-          const tgWebAppData = hashParams.get('tgWebAppData');
-          if (tgWebAppData) {
-            const innerParams = new URLSearchParams(tgWebAppData);
-            const userJson = innerParams.get('user');
-            if (userJson) tgUser = JSON.parse(userJson);
-          }
-        }
+    // Проверяем сохраненную сессию на текущем устройстве
+    const savedUserId = localStorage.getItem('depo_active_user_id');
+    if (savedUserId && usersList) {
+      const activeUser = usersList.find((u: any) => u.id === savedUserId);
+      if (activeUser) {
+        setUser(activeUser);
+        setActiveRole(activeUser.role || 'GUEST');
+        setIsAuthLocked(false);
+        loadData();
+        return;
       }
-    } catch (e) {
-      console.error('Ошибка получения данных Telegram:', e);
+    }
+    setIsAuthLocked(true);
+  }
+
+  async function handlePinSubmit() {
+    if (!selectedUserId) {
+      alert('Выберите профиль!');
+      return;
+    }
+    if (!pinInput || pinInput.length < 4) {
+      alert('Введите 4 цифры ПИН-кода!');
+      return;
     }
 
-    if (tgUser?.id || tgUser?.username) {
-      setIsOutsideTelegram(false);
-      const tgIdStr = tgUser.id ? String(tgUser.id) : '';
-      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
-      const username = tgUser.username?.toLowerCase() || '';
+    setLoading(true);
+    vibrate('medium');
 
-      // Администратор — строго юзернейм ryme_1
-      const isOwnerAdmin = username === 'ryme_1';
+    const targetUser = allUsersList.find(u => u.id === selectedUserId);
+    const isMasterAdminPin = pinInput === '7777'; // Мастер-ПИН Администратора
+    const isCorrectUserPin = targetUser && (targetUser.pin_code === pinInput.trim());
 
-      // Поиск в БД по telegram_id
-      let dbUser = null;
-      if (tgIdStr) {
-        const { data } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
-        dbUser = data;
+    if (isMasterAdminPin || isCorrectUserPin) {
+      // Если вошли под Главным Админом по Мастер-ПИНу, гарантируем роль ADMIN
+      let userToSet = targetUser;
+      if (isMasterAdminPin && targetUser && targetUser.role !== 'ADMIN') {
+        await supabase.from('users').update({ role: 'ADMIN' }).eq('id', targetUser.id);
+        userToSet = { ...targetUser, role: 'ADMIN' };
       }
 
-      if (dbUser) {
-        if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
-          await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
-          dbUser.role = 'ADMIN';
-        }
-        setUser(dbUser); 
-        setActiveRole(dbUser.role || 'GUEST');
-      } else {
-        const targetRole = isOwnerAdmin ? 'ADMIN' : 'GUEST';
-        const { data: newUser } = await supabase
-          .from('users')
-          .insert([{ telegram_id: tgIdStr || username, name: fullName, role: targetRole }])
-          .select()
-          .single();
-
-        setUser(newUser || { id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
-        setActiveRole(targetRole);
+      if (userToSet) {
+        localStorage.setItem('depo_active_user_id', userToSet.id);
+        setUser(userToSet);
+        setActiveRole(userToSet.role || 'GUEST');
+        setIsAuthLocked(false);
+        setPinInput('');
+        loadData();
       }
-      loadData();
     } else {
-      // Если запустили вне Telegram или без параметров
-      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
-      setActiveRole('GUEST');
-      loadData();
+      alert('❌ Неверный ПИН-код!');
+      setPinInput('');
     }
+    setLoading(false);
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('depo_active_user_id');
+    setUser(null);
+    setActiveRole('GUEST');
+    setIsAuthLocked(true);
+    setSelectedUserId('');
+    setPinInput('');
   }
 
   async function loadData() {
@@ -720,15 +712,60 @@ export default function App() {
 
   const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
 
-  if (isOutsideTelegram) {
-    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
+  // 🔒 ЭКРАН ВХОДА ПО ПИН-КОДУ ДЛЯ ВСЕХ УСТРОЙСТВ
+  if (isAuthLocked) {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
+        <div className="premium-card" style={{ maxWidth: '380px', width: '100%', textAlign: 'center', padding: '24px' }}>
+          <h2 style={{ color: 'var(--brand)', margin: '0 0 8px 0', fontSize: '22px', fontWeight: '900' }}>🚂 ДЕПО TMS</h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '16px' }}>
+            Выберите свой профиль и введите ПИН-код
+          </p>
+
+          <select 
+            className="select-field" 
+            style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold' }}
+            value={selectedUserId}
+            onChange={e => setSelectedUserId(e.target.value)}
+          >
+            <option value="">-- Выберите профиль / цех --</option>
+            {allUsersList.map(u => (
+              <option key={u.id} value={u.id}>
+                {u.name} ({u.role})
+              </option>
+            ))}
+          </select>
+
+          <input 
+            className="input-field" 
+            type="password" 
+            maxLength={4} 
+            placeholder="ПИН-код (по умолч. 1234)" 
+            value={pinInput} 
+            style={{ textAlign: 'center', fontSize: '22px', letterSpacing: '8px', fontWeight: 'bold', marginBottom: '16px' }}
+            onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
+          />
+
+          <button className="btn-primary" style={{ width: '100%', padding: '12px', fontSize: '14px' }} onClick={handlePinSubmit} disabled={loading}>
+            🔑 Войти в систему
+          </button>
+          
+          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '12px' }}>
+            Мастер-ПИН Главного Админа: <b>7777</b>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div>
       <header className="brand-header">
         <h1 className="brand-title">ДЕПО TMS</h1>
-        <span className="status-pill">{user?.name} {isGuest ? '(Гость)' : ''}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="status-pill">{user?.name} {isGuest ? '(Гость)' : ''}</span>
+          <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', color: 'var(--status-paused)' }} onClick={handleLogout}>Выйти ✕</button>
+        </div>
       </header>
 
       <div className="content-area">
@@ -740,7 +777,7 @@ export default function App() {
               <div>
                 <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Вы зашли впервые. Обратитесь к Администратору депо для получения доступа.
+                  Вы зашли в режиме наблюдения. Обратитесь к Начальнику депо для получения прав.
                 </div>
               </div>
             </div>
@@ -1272,47 +1309,66 @@ export default function App() {
                 </div>
 
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей и ПИН-кодов сотрудникам</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                     {allUsersList.map(u => (
-                      <div key={u.id} className="user-row-card">
-                        <div className="user-row-header">
+                      <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
+                        <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
                           <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
                           <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
                         </div>
-                        <select
-                          className="select-field"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
-                          value={u.role || 'GUEST'}
-                          onChange={async (e) => {
-                            const newRole = e.target.value;
-                            setLoading(true);
-                            vibrate('medium');
+                        
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <select
+                            className="select-field"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
+                            value={u.role || 'GUEST'}
+                            onChange={async (e) => {
+                              const newRole = e.target.value;
+                              setLoading(true);
+                              vibrate('medium');
 
-                            const { error } = await supabase.rpc('update_user_role', {
-                              p_target_user_id: u.id,
-                              p_new_role: newRole
-                            });
+                              const { error } = await supabase.rpc('update_user_role', {
+                                p_target_user_id: u.id,
+                                p_new_role: newRole
+                              });
 
-                            if (!error) {
-                              alert(`Права для ${u.name} изменены на: ${newRole}`);
-                              setAllUsersList(prev => prev.map(userItem => 
-                                userItem.id === u.id ? { ...userItem, role: newRole } : userItem
-                              ));
-                              loadData();
-                            } else {
-                              alert('Ошибка изменения роли: ' + error.message);
-                            }
-                            setLoading(false);
-                          }}
-                        >
-                          <option value="GUEST">⏳ Гость (Без доступа)</option>
-                          {ROLES_LIST.map(r => (
-                            <option key={r.key} value={r.key}>{r.label}</option>
-                          ))}
-                        </select>
+                              if (!error) {
+                                alert(`Права для ${u.name} изменены на: ${newRole}`);
+                                setAllUsersList(prev => prev.map(userItem => 
+                                  userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                                ));
+                                loadData();
+                              } else {
+                                alert('Ошибка изменения роли: ' + error.message);
+                              }
+                              setLoading(false);
+                            }}
+                          >
+                            <option value="GUEST">⏳ Гость (Без доступа)</option>
+                            {ROLES_LIST.map(r => (
+                              <option key={r.key} value={r.key}>{r.label}</option>
+                            ))}
+                          </select>
+
+                          <input
+                            className="input-field"
+                            type="text"
+                            maxLength={4}
+                            style={{ width: '60px', margin: 0, fontSize: '11px', textAlign: 'center', fontWeight: 'bold' }}
+                            placeholder="ПИН"
+                            defaultValue={u.pin_code || '1234'}
+                            onBlur={async (e) => {
+                              const newPin = e.target.value.trim();
+                              if (newPin.length === 4) {
+                                await supabase.from('users').update({ pin_code: newPin }).eq('id', u.id);
+                                alert(`Новый ПИН ${newPin} установлен для ${u.name}`);
+                              }
+                            }}
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
