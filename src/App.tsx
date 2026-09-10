@@ -163,42 +163,58 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
-    let tg: any = null;
     let tgUser: any = null;
 
     try {
-      tg = window.Telegram?.WebApp || WebApp;
+      const tg = window.Telegram?.WebApp || WebApp;
       if (tg) {
         tg.ready();
         tg.expand();
         tg.setHeaderColor?.('bg_main');
-        
-        // 1. Пробуем стандартный объект
-        tgUser = tg.initDataUnsafe?.user;
 
-        // 2. Если пустой (баг ПК) — распарсиваем сырую строку initData
+        // 1. Прямой объект Telegram SDK
+        if (tg.initDataUnsafe?.user?.id) {
+          tgUser = tg.initDataUnsafe.user;
+        }
+
+        // 2. Строка initData
         if (!tgUser && tg.initData) {
-          const searchParams = new URLSearchParams(tg.initData);
-          const userJson = searchParams.get('user');
-          if (userJson) {
-            tgUser = JSON.parse(userJson);
+          const params = new URLSearchParams(tg.initData);
+          const userJson = params.get('user');
+          if (userJson) tgUser = JSON.parse(userJson);
+        }
+
+        // 3. Парсинг Hash URL (специально для Telegram Desktop)
+        if (!tgUser && window.location.hash) {
+          const hashRaw = window.location.hash.replace('#', '');
+          const hashParams = new URLSearchParams(hashRaw);
+          const tgWebAppData = hashParams.get('tgWebAppData');
+          if (tgWebAppData) {
+            const innerParams = new URLSearchParams(tgWebAppData);
+            const userJson = innerParams.get('user');
+            if (userJson) tgUser = JSON.parse(userJson);
           }
         }
       }
     } catch (e) {
-      console.error('Telegram WebApp Error:', e);
+      console.error('Ошибка получения данных Telegram:', e);
     }
 
-    if (tgUser?.id) {
+    if (tgUser?.id || tgUser?.username) {
       setIsOutsideTelegram(false);
-      const tgIdStr = String(tgUser.id);
+      const tgIdStr = tgUser.id ? String(tgUser.id) : '';
       const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
       const username = tgUser.username?.toLowerCase() || '';
 
-      // Авто-выдача ADMIN для @ryme_1
+      // Администратор — строго юзернейм ryme_1
       const isOwnerAdmin = username === 'ryme_1';
 
-      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
+      // Поиск в БД по telegram_id
+      let dbUser = null;
+      if (tgIdStr) {
+        const { data } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
+        dbUser = data;
+      }
 
       if (dbUser) {
         if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
@@ -211,7 +227,7 @@ export default function App() {
         const targetRole = isOwnerAdmin ? 'ADMIN' : 'GUEST';
         const { data: newUser } = await supabase
           .from('users')
-          .insert([{ telegram_id: tgIdStr, name: fullName, role: targetRole }])
+          .insert([{ telegram_id: tgIdStr || username, name: fullName, role: targetRole }])
           .select()
           .single();
 
@@ -220,13 +236,13 @@ export default function App() {
       }
       loadData();
     } else {
-      // Если даже после парсинга Telegram не дал ID
+      // Если запустили вне Telegram или без параметров
       setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
       setActiveRole('GUEST');
       loadData();
     }
   }
-  
+
   async function loadData() {
     const { data: repairData } = await supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
