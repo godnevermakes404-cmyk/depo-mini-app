@@ -187,26 +187,34 @@ export default function App() {
     if (tgUser?.id) {
       const tgIdStr = String(tgUser.id);
       const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Пользователь';
+      const username = tgUser.username?.toLowerCase() || '';
+
+      // Проверка на владельца: только @ryme_1 заходит как ADMIN
+      const isOwnerAdmin = username === 'ryme_1';
 
       const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
+        if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
+          await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
+          dbUser.role = 'ADMIN';
+        }
         setUser(dbUser); 
         setActiveRole(dbUser.role || 'GUEST');
       } else {
-        // Все новые пользователи СТРОГО получают роль GUEST
+        const targetRole = isOwnerAdmin ? 'ADMIN' : 'GUEST';
         const { data: newUser } = await supabase
           .from('users')
-          .insert([{ telegram_id: tgIdStr, name: fullName, role: 'GUEST' }])
+          .insert([{ telegram_id: tgIdStr, name: fullName, role: targetRole }])
           .select()
           .single();
 
         if (newUser) {
           setUser(newUser);
-          setActiveRole('GUEST');
+          setActiveRole(targetRole);
         } else {
-          setUser({ id: 'guest_temp', name: fullName, role: 'GUEST', telegram_id: tgIdStr });
-          setActiveRole('GUEST');
+          setUser({ id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
+          setActiveRole(targetRole);
         }
       }
     } else {
@@ -252,7 +260,6 @@ export default function App() {
   const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
-  // Динамический поиск ответственного по роли из таблицы пользователей
   const getAssignedMaster = (shopKey: string) => {
     const assigned = allUsersList.find(u => u.role === shopKey);
     if (assigned) {
