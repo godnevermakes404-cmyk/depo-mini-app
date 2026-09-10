@@ -171,6 +171,17 @@ export default function App() {
     return uuidRegex.test(u.id) ? u.id : null;
   };
 
+  // Проверка статусов завершения ремонта / готовности / отправки
+  const isCompletionStatus = (st: string) => {
+    if (!st) return false;
+    return st === CASE_STATUS.READY || 
+           st.includes('READY') || 
+           st.includes('DISPATCH') || 
+           st.includes('COMPLETED') ||
+           st.includes('11') ||
+           st.includes('12');
+  };
+
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
@@ -598,6 +609,13 @@ export default function App() {
 
   async function handleUpdateStatus(newStatus: string) {
     if (isGuest || !selectedCase) return;
+    
+    // Блокировка на уровне функций если пытаются завершить без справок
+    if (isCompletionStatus(newStatus) && !hasCompletionDocs) {
+      alert('⚠️ Действие заблокировано: Для перевода вагона прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М)!');
+      return;
+    }
+
     if (newStatus === CASE_STATUS.PAUSED) { 
       setDelayCategory('Materials');
       const supplyInfo = getAssignedMaster('procurement');
@@ -698,12 +716,11 @@ export default function App() {
   const hasActPhoto = Boolean(actPhotoDoc);
   
   const hasCompletionDocs = documents.some(d => 
-    d.doc_type?.includes('ВУ-23') || d.doc_type?.includes('2612') || d.doc_type?.includes('36М')
+    d.doc_type?.includes('ВУ-23') || 
+    d.doc_type?.includes('2612') || 
+    d.doc_type?.includes('36М') ||
+    d.doc_type?.includes('ВУ-36')
   );
-
-  const canSendToReady = selectedCase?.current_status === CASE_STATUS.IN_REPAIR 
-    ? hasCompletionDocs 
-    : true;
 
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
   const isReadyStatus = selectedCase?.current_status === CASE_STATUS.READY;
@@ -1378,38 +1395,59 @@ export default function App() {
                           <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
                         </div>
                         
-                        <select
-                          className="select-field"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
-                          value={u.role || 'GUEST'}
-                          onChange={async (e) => {
-                            const newRole = e.target.value;
-                            setLoading(true);
-                            vibrate('medium');
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <select
+                            className="select-field"
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
+                            value={u.role || 'GUEST'}
+                            onChange={async (e) => {
+                              const newRole = e.target.value;
+                              setLoading(true);
+                              vibrate('medium');
 
-                            const { error } = await supabase.rpc('update_user_role', {
-                              p_target_user_id: u.id,
-                              p_new_role: newRole
-                            });
+                              const { error } = await supabase.rpc('update_user_role', {
+                                p_target_user_id: u.id,
+                                p_new_role: newRole
+                              });
 
-                            if (!error) {
-                              alert(`Права для ${u.name} изменены на: ${newRole}`);
-                              setAllUsersList(prev => prev.map(userItem => 
-                                userItem.id === u.id ? { ...userItem, role: newRole } : userItem
-                              ));
-                              loadData();
-                            } else {
-                              alert('Ошибка изменения роли: ' + error.message);
-                            }
-                            setLoading(false);
-                          }}
-                        >
-                          {ROLES_LIST.map(r => (
-                            <option key={r.key} value={r.key}>{r.label}</option>
-                          ))}
-                        </select>
+                              if (!error) {
+                                alert(`Права для ${u.name} изменены на: ${newRole}`);
+                                setAllUsersList(prev => prev.map(userItem => 
+                                  userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                                ));
+                                loadData();
+                              } else {
+                                alert('Ошибка изменения роли: ' + error.message);
+                              }
+                              setLoading(false);
+                            }}
+                          >
+                            {ROLES_LIST.map(r => (
+                              <option key={r.key} value={r.key}>{r.label}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            className="btn-secondary"
+                            style={{ padding: '0 8px', fontSize: '11px', color: 'var(--status-paused)', width: 'auto' }}
+                            onClick={async () => {
+                              if (!window.confirm(`Удалить профиль "${u.name}" (${u.role})?`)) return;
+                              setLoading(true);
+                              vibrate('heavy');
+                              const { error } = await supabase.from('users').delete().eq('id', u.id);
+                              if (!error) {
+                                setAllUsersList(prev => prev.filter(item => item.id !== u.id));
+                              } else {
+                                alert('Ошибка удаления: ' + error.message);
+                              }
+                              setLoading(false);
+                            }}
+                          >
+                            🗑️
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1860,16 +1898,16 @@ export default function App() {
                       <h4 style={{ margin: 0, fontSize: '12px' }}>Допустимые действия:</h4>
                     </div>
 
-                    {!hasCompletionDocs && selectedCase?.current_status === CASE_STATUS.IN_REPAIR && (
+                    {!hasCompletionDocs && (
                       <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
-                        ⚠️ Для перевода в «Готов к отправке» прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
+                        ⚠️ Для перевода в готовность/отправку прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
                       </div>
                     )}
 
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                       {visibleTransitions.map((st: string) => {
-                        const isReadyAction = st === CASE_STATUS.READY;
-                        const isDisabled = loading || (isReadyAction && !canSendToReady);
+                        const isTargetReady = isCompletionStatus(st);
+                        const isDisabled = loading || (isTargetReady && !hasCompletionDocs);
 
                         return (
                           <button 
@@ -1882,6 +1920,7 @@ export default function App() {
                               fontSize: '11px', 
                               width: 'auto', 
                               opacity: isDisabled ? 0.5 : 1,
+                              cursor: isDisabled ? 'not-allowed' : 'pointer',
                               background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' 
                             }}
                           >
