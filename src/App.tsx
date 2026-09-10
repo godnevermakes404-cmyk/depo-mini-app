@@ -86,9 +86,6 @@ const ROLES_LIST = [
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
-// ============================================================
-// 🔐 ХЕЛПЕРЫ ДЛЯ ХРАНЕНИЯ СЕССИИ
-// ============================================================
 function readCloudStorage(key: string): Promise<string | null> {
   return new Promise((resolve) => {
     try {
@@ -121,7 +118,6 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
-  // Состояния авторизации
   const [loginRole, setLoginRole] = useState<string>('operator');
   const [loginPin, setLoginPin] = useState<string>('');
   const [loginName, setLoginName] = useState<string>('');
@@ -209,9 +205,6 @@ export default function App() {
            st.includes('12');
   };
 
-  // ============================================================
-  // ПОДПИСКА НА ОНЛАЙН-ОБНОВЛЕНИЯ И ИНИЦИАЛИЗАЦИЯ
-  // ============================================================
   useEffect(() => { 
     initAuthAndData(); 
 
@@ -355,20 +348,19 @@ export default function App() {
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
   // ============================================================
-  // 🔐 ЖЕСТКОЕ РАЗГРАНИЧЕНИЕ ПРАВ ДОСТУПА (RBAC)
+  // 🔐 ПРАВА ДОСТУПА (RBAC)
   // ============================================================
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  
-  // Документооборот (docs), Админ и Оператор могут редактировать вагоны (номер, вид ремонта, собственник)
   const canEditWagonDetails = !isGuest && (isAdminOrOperator || activeRole === 'docs'); 
-  
-  // Управление глобальным статусом вагона (В ремонт, Готов, Задержан)
   const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
   
-  // Кнопки цеха доступны ТОЛЬКО Мастеру этого цеха и Начальнику депо (ADMIN)
-const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
-  
+  // Кнопки цеха (Начать/Завершить/Н/Т) доступны Мастеру цеха и ADMIN
+  const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
+
+  // Отправлять готовую работу на ДОРАБОТКУ могут Мастер, ADMIN и ОТК
+  const canReworkShop = (targetShopKey: string) => canPerformAction(targetShopKey) || activeRole === 'otk';
+
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
   const getAssignedMaster = (shopKey: string) => {
@@ -634,10 +626,20 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
   }
 
   async function handleUpdateShopStage(shopKey: string, status: string) {
-    if (!canPerformAction(shopKey) || !selectedCase) return;
+    const isRework = status === 'IN_PROGRESS';
+    const isAllowed = isRework ? canReworkShop(shopKey) : canPerformAction(shopKey);
+
+    if (!isAllowed || !selectedCase) return;
     setLoading(true);
     const masterLabel = status === 'NOT_REQUIRED' ? 'Не требуется' : getMasterLabel(shopKey);
-    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: getValidUserId(user) });
+    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { 
+      p_repair_id: selectedCase.repair_id, 
+      p_shop_key: shopKey, 
+      p_status: status, 
+      p_master_name: masterLabel, 
+      p_user_id: getValidUserId(user) 
+    });
+
     if (!error) { 
       if (status !== 'NOT_REQUIRED') {
         notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); 
@@ -808,19 +810,22 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
     }
   }
 
+  // ⏱️ РАСЧЕТ ВРЕМЕНИ БЕЗ НОРМА-ЧАСОВ
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
     const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
-    if (!startTime) return { text: `Норма: ${targetHours} ч`, isOverdue: false };
+    if (!startTime) return { text: '', isOverdue: false };
     const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
-    return { text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин / Норма: ${targetHours} ч` : `${hoursSpent.toFixed(1)} ч / Норма: ${targetHours} ч`, isOverdue: hoursSpent > targetHours };
+    return { 
+      text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`, 
+      isOverdue: targetHours > 0 ? hoursSpent > targetHours : false 
+    };
   };
 
   if (isOutsideTelegram) {
     return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
   }
 
-  // 🔒 ПОЛНОЭКРАННЫЙ ЭКРАН АВТОРИЗАЦИИ ДЛЯ НЕАВТОРИЗОВАННЫХ ПОЛЬЗОВАТЕЛЕЙ (GUEST)
   if (isGuest) {
     return (
       <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
@@ -900,7 +905,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
       </header>
 
       <div className="content-area">
-        {/* СИГНАЛ ОПЕРАТОРУ О НЕОФОРМЛЕННЫХ ВАГОНАХ С КПП */}
         {unassignedWagonsCount > 0 && isAdminOrOperator && (
           <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }} onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -919,7 +923,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
 
         {currentTab === 'home' && (
           <>
-            {/* 1. БАННЕР-АЛАРМ ДИСПЕТЧЕРА */}
             {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)', background: 'var(--status-paused-bg)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
@@ -939,7 +942,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               <span style={{ fontSize: '18px', fontWeight: '900', color: 'var(--brand)' }}>{onSiteRepairs.length} ваг.</span>
             </div>
 
-            {/* 2. BENTO СЕТКА СТАТИСТИКИ */}
             <div className="stats-grid">
               <div className="stat-box queue" onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
                 <span className="stat-label">В очереди</span>
@@ -959,7 +961,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               </div>
             </div>
 
-            {/* 3. БЫСТРЫЕ ДЕЙСТВИЯ */}
             <div className="premium-card">
               <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
                 ⚡ Быстрые действия
@@ -976,7 +977,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               </div>
             </div>
 
-            {/* 4. РАЗБОР ЗАДЕРЖАННЫХ ВАГОНОВ */}
             {(() => {
               const activeDelays = delayLogs.filter(d => !d.end_datetime);
               if (activeDelays.length === 0) return null;
@@ -1009,7 +1009,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               );
             })()}
 
-            {/* 5. ГОРЯЩИЕ ВАГОНЫ С НАИБОЛЬШИМ ПРОСТОЕМ */}
             {(() => {
               const criticalWagons = repairs
                 .filter(r => r.current_status !== CASE_STATUS.READY)
@@ -1052,7 +1051,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               );
             })()}
 
-            {/* 6. СИГНАЛ ДЕФИЦИТА СКЛАДА */}
             {(() => {
               const deficitItems = warehouseItems.filter(i => Number(i.quantity) <= Number(i.min_limit)).slice(0, 3);
               if (deficitItems.length === 0) return null;
@@ -1212,7 +1210,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
           </>
         )}
 
-        {/* ВКЛАДКА СКЛАД */}
         {currentTab === 'warehouse' && (
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -1410,7 +1407,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               )}
             </div>
 
-            {/* Панель управления ролями доступна Администратору */}
             {user?.role === 'ADMIN' ? (
               <>
                 {activeRole !== 'ADMIN' && (
@@ -1521,7 +1517,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         )}
       </div>
 
-      {/* НИЖНЕЕ МЕНЮ С ВЕКТОРНЫМИ ИКОНКАМИ */}
       <nav className="bottom-nav">
         <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
           <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -1545,7 +1540,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         </button>
       </nav>
 
-      {/* МОДАЛКА БЫСТРОГО ПРИХОДА / РАСХОДА */}
       {!isGuest && showStockAdjustModal && adjustingItem && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -1594,7 +1588,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         </div>
       )}
 
-      {/* МОДАЛКА СОЗДАНИЯ / ИНВЕНТАРИЗАЦИИ ПАРАМЕТРОВ ТОВАРА */}
       {!isGuest && showItemModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -1645,7 +1638,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         </div>
       )}
 
-      {/* Модалка: ВВОД КОЛИЧЕСТВА НА КПП */}
       {!isGuest && showAddModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
@@ -1675,7 +1667,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         </div>
       )}
 
-      {/* Универсальная Модалка Вагона */}
       {selectedCase && !showDelayModal && (
         <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
           <div className="bottom-sheet">
@@ -1690,7 +1681,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА / ДОКУМЕНТООБОРОТА */}
             {canEditWagonDetails && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
                 <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
@@ -1785,7 +1775,7 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
                       <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>{s.label}
-                            {!isNotRequired && (
+                            {!isNotRequired && timeInfo.text && (
                               <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
                                 ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
                               </span>
@@ -1797,8 +1787,13 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
                           {isDone ? (
                             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                               <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
-                              {canEdit && (
-                                <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '9px', color: 'var(--status-paused)' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
+                              {canReworkShop(s.key) && (
+                                <button 
+                                  className="btn-secondary" 
+                                  style={{ padding: '2px 6px', fontSize: '9px', color: 'var(--status-paused)' }} 
+                                  onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} 
+                                  disabled={loading}
+                                >
                                   ↺ Доработка
                                 </button>
                               )}
@@ -2056,7 +2051,6 @@ const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 
         </div>
       )}
 
-      {/* Модалка задержки */}
       {!isGuest && showDelayModal && (
         <div className="backdrop">
           <div className="bottom-sheet">
