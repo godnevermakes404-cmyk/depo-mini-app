@@ -50,7 +50,6 @@ interface UserRecord { id: string; name: string; role: string; telegram_id: stri
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
-// Общий список цехов для этапов ремонта
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
@@ -61,7 +60,6 @@ const DEFAULT_SHOPS = [
   { key: 'mech_equip', label: 'Цех механического оборудования' }
 ];
 
-// Список цехов для подписания Комиссионного Акта ВУ-22 (ШАГ 1)
 const ACT_SIGNING_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
@@ -95,13 +93,11 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
-  // Фильтры вагонов
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
   const [delayCategoryFilter, setDelayCategoryFilter] = useState<string | null>(null);
 
-  // Складские состояния
   const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
   const [warehouseSearch, setWarehouseSearch] = useState<string>('');
   const [warehouseCatFilter, setWarehouseCatFilter] = useState<string | null>(null);
@@ -113,7 +109,6 @@ export default function App() {
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
 
-  // Быстрый приход / расход
   const [showStockAdjustModal, setShowStockAdjustModal] = useState<boolean>(false);
   const [adjustingItem, setAdjustingItem] = useState<WarehouseItem | null>(null);
   const [stockDelta, setStockDelta] = useState<string>('10');
@@ -657,7 +652,6 @@ export default function App() {
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   
-  // Проверка подписи акта строго по 5 актуальным цехам!
   const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
@@ -672,6 +666,7 @@ export default function App() {
     : true;
 
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
+  const isReadyStatus = selectedCase?.current_status === CASE_STATUS.READY;
   
   const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
   const isPauseAuthor = Boolean(lastPauseEvent && (lastPauseEvent.user_id === user?.id || (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)));
@@ -679,16 +674,27 @@ export default function App() {
   const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
-  // СОХРАНЯЕМ И ОСНОВНОЙ СЛЕДУЮЩИЙ ШАГ, И ВОЗМОЖНОСТЬ ВЕРНУТЬ В РЕМОНТ/ЗАДЕРЖКУ!
-  const baseTransitions = selectedCase?.current_status === CASE_STATUS.READY
-    ? Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]))
-    : availableTransitions;
-
-  const visibleTransitions = isGuest ? [] : (
-    isPausedState 
-      ? (canResumeFromPause ? availableTransitions : [])
-      : (canManageStatus ? baseTransitions : availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED))
-  );
+  // 🎯 РАЗДЕЛЕНИЕ ПРАВ В СТАТУСЕ "ГОТОВ К ОТПРАВКЕ":
+  let visibleTransitions: string[] = [];
+  if (!isGuest && selectedCase) {
+    if (isPausedState) {
+      if (canResumeFromPause) visibleTransitions = availableTransitions;
+    } else if (isReadyStatus) {
+      if (isAdminOrOperator) {
+        // ОПЕРАТОР / АДМИН: окончательная отправка из депо ИЛИ возврат на доработку / паузу
+        visibleTransitions = Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]));
+      } else if (activeRole === 'otk') {
+        // ОТК: ТОЛЬКО возврат в ремонт или задержку, без кнопок отправки из депо
+        visibleTransitions = [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED];
+      }
+    } else {
+      if (canManageStatus) {
+        visibleTransitions = availableTransitions;
+      } else {
+        visibleTransitions = availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
+      }
+    }
+  }
 
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
     const startTime = startAt ? new Date(startAt).getTime() : null;
