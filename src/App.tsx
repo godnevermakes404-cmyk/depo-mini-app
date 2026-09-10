@@ -93,9 +93,10 @@ export default function App() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
 
-  // Состояние ручного выбора профиля, если Telegram скрыл ID
-  const [manualUserSelection, setManualUserSelection] = useState<string>('');
-  const [manualUsernameInput, setManualUsernameInput] = useState<string>('');
+  // Состояния серверной авторизации по ПИН-коду
+  const [loginRole, setLoginRole] = useState<string>('operator');
+  const [loginPin, setLoginPin] = useState<string>('');
+  const [loginName, setLoginName] = useState<string>('');
 
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -144,6 +145,7 @@ export default function App() {
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
   const [docNumber, setDocNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
 
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
@@ -172,7 +174,6 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
-    // 1. Проверяем сохраненный сеанс в локальном хранилище
     const savedUserId = localStorage.getItem('depo_saved_user_id');
     if (savedUserId) {
       const { data: savedDbUser } = await supabase.from('users').select('*').eq('id', savedUserId).maybeSingle();
@@ -184,7 +185,6 @@ export default function App() {
       }
     }
 
-    // 2. Извлекаем данные из Telegram WebApp
     let tgUser: any = null;
     try {
       const tg = window.Telegram?.WebApp;
@@ -212,94 +212,56 @@ export default function App() {
       }
     } catch (e) {}
 
-    // 3. Авторизация по Telegram ID
-    if (tgUser?.id || tgUser?.username) {
-      const tgIdStr = tgUser.id ? String(tgUser.id) : '';
-      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Сотрудник';
-      const username = tgUser.username?.toLowerCase() || '';
-
-      const isOwnerAdmin = username === 'ryme_1';
-
-      let dbUser = null;
-      if (tgIdStr) {
-        const { data } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
-        dbUser = data;
-      }
+    if (tgUser?.id) {
+      setIsOutsideTelegram(false);
+      const tgIdStr = String(tgUser.id);
+      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
 
       if (dbUser) {
-        if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
-          await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
-          dbUser.role = 'ADMIN';
-        }
         localStorage.setItem('depo_saved_user_id', dbUser.id);
         setUser(dbUser); 
         setActiveRole(dbUser.role || 'GUEST');
       } else {
-        const targetRole = isOwnerAdmin ? 'ADMIN' : 'GUEST';
-        const { data: newUser } = await supabase
-          .from('users')
-          .insert([{ telegram_id: tgIdStr || username, name: fullName, role: targetRole }])
-          .select()
-          .single();
-
-        if (newUser) {
-          localStorage.setItem('depo_saved_user_id', newUser.id);
-          setUser(newUser);
-          setActiveRole(newUser.role || 'GUEST');
-        }
+        setUser({ id: 'guest_temp', name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Гость', role: 'GUEST', telegram_id: tgIdStr });
+        setActiveRole('GUEST');
       }
+    } else {
+      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+      setActiveRole('GUEST');
     }
     loadData();
   }
 
-  async function handleManualLogin() {
-    setLoading(true);
-    vibrate('medium');
-
-    // Если введён юзернейм ryme_1
-    const cleanUsername = manualUsernameInput.trim().toLowerCase().replace('@', '');
-    
-    if (cleanUsername === 'ryme_1') {
-      let { data: adminUser } = await supabase.from('users').select('*').eq('telegram_id', 'ryme_1').maybeSingle();
-      if (!adminUser) {
-        const { data: created } = await supabase
-          .from('users')
-          .insert([{ telegram_id: 'ryme_1', name: 'Начальник депо (@ryme_1)', role: 'ADMIN' }])
-          .select()
-          .single();
-        adminUser = created;
-      } else if (adminUser.role !== 'ADMIN') {
-        await supabase.from('users').update({ role: 'ADMIN' }).eq('id', adminUser.id);
-        adminUser.role = 'ADMIN';
-      }
-
-      if (adminUser) {
-        localStorage.setItem('depo_saved_user_id', adminUser.id);
-        setUser(adminUser);
-        setActiveRole('ADMIN');
-        setManualUsernameInput('');
-        loadData();
-      }
-      setLoading(false);
+  async function handlePinLogin() {
+    if (!loginName.trim() || !loginPin.trim()) {
+      alert('Введите ваше имя и PIN-код!');
       return;
     }
 
-    // Если выбран профиль из выпадающего списка
-    if (manualUserSelection) {
-      const selectedObj = allUsersList.find(u => u.id === manualUserSelection);
-      if (selectedObj) {
-        localStorage.setItem('depo_saved_user_id', selectedObj.id);
-        setUser(selectedObj);
-        setActiveRole(selectedObj.role || 'GUEST');
-        loadData();
-      }
+    setLoading(true); vibrate('medium');
+
+    const { data, error } = await supabase.rpc('login_with_pin', {
+      p_role: loginRole,
+      p_pin: loginPin.trim(),
+      p_name: loginName.trim()
+    });
+
+    if (error || !data) {
+      alert('❌ Неверный PIN-код для выбранного отдела!');
+    } else {
+      localStorage.setItem('depo_saved_user_id', data.id);
+      setUser(data);
+      setActiveRole(data.role || 'GUEST');
+      setLoginPin('');
+      setLoginName('');
+      loadData();
     }
     setLoading(false);
   }
 
   function handleLogout() {
     localStorage.removeItem('depo_saved_user_id');
-    setUser(null);
+    setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
     setActiveRole('GUEST');
   }
 
@@ -779,6 +741,10 @@ export default function App() {
     return { text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин / Норма: ${targetHours} ч` : `${hoursSpent.toFixed(1)} ч / Норма: ${targetHours} ч`, isOverdue: hoursSpent > targetHours };
   };
 
+  if (isOutsideTelegram) {
+    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
+  }
+
   return (
     <div>
       <header className="brand-header">
@@ -787,7 +753,7 @@ export default function App() {
       </header>
 
       <div className="content-area">
-        {/* УВЕДОМЛЕНИЕ ДЛЯ ГОСТЯ С БЛОКОМ РЕЗЕРВНОГО ВХОДА */}
+        {/* УВЕДОМЛЕНИЕ ДЛЯ ГОСТЯ И ФОРМА АВТОРИЗАЦИИ ПО ПИН-КОДУ ОТДЕЛОВ */}
         {isGuest && (
           <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
@@ -795,46 +761,48 @@ export default function App() {
               <div>
                 <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Вы зашли впервые или Telegram на ПК скрыл ваш ID. Обратитесь к Начальнику депо для получения прав.
+                  Для работы с вагонами выберите свой отдел и введите персональный PIN-код.
                 </div>
               </div>
             </div>
 
-            {/* Блок быстрого вызова логина если Telegram скрыл ID */}
+            {/* Безопасная авторизация по серверным ПИН-кодам */}
             <div style={{ borderTop: '1px dashed var(--border-subtle)', paddingTop: '10px', marginTop: '6px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '6px' }}>🔑 Резервный вход в аккаунт:</div>
-              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 'bold', marginBottom: '6px' }}>🔑 Вход по отделу и PIN-коду:</div>
+              <select
+                className="select-field"
+                style={{ margin: '0 0 6px 0', fontSize: '11px' }}
+                value={loginRole}
+                onChange={e => setLoginRole(e.target.value)}
+              >
+                {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => (
+                  <option key={r.key} value={r.key}>{r.label}</option>
+                ))}
+              </select>
+
+              <input
+                className="input-field"
+                style={{ margin: '0 0 6px 0', fontSize: '11px' }}
+                type="text"
+                placeholder="Ваше имя / Фамилия"
+                value={loginName}
+                onChange={e => setLoginName(e.target.value)}
+              />
+
+              <div style={{ display: 'flex', gap: '6px' }}>
                 <input
                   className="input-field"
                   style={{ margin: 0, fontSize: '11px' }}
-                  type="text"
-                  placeholder="Ваш юзернейм (@ryme_1)"
-                  value={manualUsernameInput}
-                  onChange={e => setManualUsernameInput(e.target.value)}
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="PIN-код"
+                  value={loginPin}
+                  onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
                 />
-                <button className="btn-primary" style={{ width: 'auto', padding: '0 10px', fontSize: '11px' }} onClick={handleManualLogin} disabled={loading}>
+                <button className="btn-primary" style={{ width: 'auto', padding: '0 14px', fontSize: '11px' }} onClick={handlePinLogin} disabled={loading}>
                   Войти
                 </button>
               </div>
-
-              {allUsersList.length > 0 && (
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <select
-                    className="select-field"
-                    style={{ margin: 0, fontSize: '11px' }}
-                    value={manualUserSelection}
-                    onChange={e => setManualUserSelection(e.target.value)}
-                  >
-                    <option value="">-- Выбрать свой профиль из списка --</option>
-                    {allUsersList.map(u => (
-                      <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
-                    ))}
-                  </select>
-                  <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px', fontSize: '11px' }} onClick={handleManualLogin} disabled={loading || !manualUserSelection}>
-                    Зайти
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         )}
