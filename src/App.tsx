@@ -423,12 +423,12 @@ export default function App() {
     setLoading(false);
   }
 
+  // Загрузка фото Акта ВУ-22 (ШАГ 1)
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file || !selectedCase) return;
-    if (!isAdminOrDocs) { alert('⛔ Загружать фото акта может только Оформитель актов или Админ!'); return; }
+    if (!file || !selectedCase || isGuest) return;
+    
     setLoading(true); vibrate('medium');
-
     const fileExt = file.name.split('.').pop() || 'jpg';
     const fileName = `${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
     const filePath = `vu22/${fileName}`;
@@ -442,18 +442,56 @@ export default function App() {
     }
 
     const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
-    const publicUrl = urlData.publicUrl;
-
+    
     const { error: rpcError } = await supabase.rpc('add_document', {
       p_repair_id: selectedCase.repair_id,
       p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
       p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number}`,
       p_user_id: user?.id || null,
-      p_file_url: publicUrl
+      p_file_url: urlData.publicUrl
     });
 
     if (!rpcError) {
       alert('📷 Фото акта ВУ-22 успешно загружено!');
+      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
+      setDocuments(docs || []);
+    } else {
+      alert('Ошибка сохранения документа: ' + rpcError.message);
+    }
+    setLoading(false);
+  }
+
+  // Универсальная загрузка любых документов из выпадающего списка
+  async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !selectedCase || isGuest) return;
+    
+    setLoading(true); vibrate('medium');
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileName = `doc_${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
+    const filePath = `vu22/${fileName}`; 
+
+    const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+
+    if (uploadError) {
+      alert('Ошибка загрузки фото документа: ' + uploadError.message);
+      setLoading(false); return;
+    }
+
+    const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
+    const finalDocNum = docNumber.trim() || `Б/Н`;
+
+    const { error: rpcError } = await supabase.rpc('add_document', {
+      p_repair_id: selectedCase.repair_id,
+      p_doc_type: docType,
+      p_doc_number: finalDocNum,
+      p_user_id: user?.id || null,
+      p_file_url: urlData.publicUrl
+    });
+
+    if (!rpcError) {
+      alert(`📷 Документ "${docType}" успешно прикреплен!`);
+      setDocNumber('');
       const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
       setDocuments(docs || []);
     } else {
@@ -501,8 +539,8 @@ export default function App() {
     setLoading(false);
   }
 
-  async function handleAddDocument() {
-    if (!isAdminOrDocs || !docNumber.trim() || !selectedCase) return;
+  async function handleAddDocumentTextOnly() {
+    if (isGuest || !docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
     const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: user?.id || null, p_file_url: null });
     if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
@@ -607,32 +645,26 @@ export default function App() {
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
+  // Документы
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
+  
+  // 🎯 Проверка наличия итоговых справок при выпуске
+  const hasCompletionDocs = documents.some(d => 
+    d.doc_type?.includes('ВУ-23') || d.doc_type?.includes('2612') || d.doc_type?.includes('36М')
+  );
 
-  // 🎯 ЛОГИКА СНЯТИЯ СИГНАЛА ЗАДЕРЖКИ
+  const canSendToReady = selectedCase?.current_status === CASE_STATUS.IN_REPAIR 
+    ? hasCompletionDocs 
+    : true;
+
+  // РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
   
-  // 1. Ищем автора паузы в журнале событий
   const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
-  const isPauseAuthor = Boolean(
-    lastPauseEvent && (
-      lastPauseEvent.user_id === user?.id || 
-      (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)
-    )
-  );
-
-  // 2. Ищем ответственную роль по категории задержки
+  const isPauseAuthor = Boolean(lastPauseEvent && (lastPauseEvent.user_id === user?.id || (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)));
   const activeDelay = delayLogs.find(d => d.repair_id === selectedCase?.repair_id && !d.end_datetime);
-  const isDelayResponsible = Boolean(
-    activeDelay && (
-      (activeDelay.category === 'Materials' && activeRole === 'procurement') ||
-      (activeDelay.category === 'Equipment' && activeRole === 'mechanic') ||
-      (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))
-    )
-  );
-
-  // Права на снятие задержки: Админ, ОТК, Диспетчер, Автор задержки или Ответственный за проблему
+  const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
   const visibleTransitions = isGuest ? [] : (
@@ -1575,7 +1607,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {isAdminOrDocs && (
+                    {!isGuest && (
                       <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
                         {hasActPhoto ? '📷 Заменить' : '📷 Загрузить фото'}
                         <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
@@ -1670,9 +1702,39 @@ export default function App() {
                 
                 {visibleTransitions.length > 0 && (
                   <div className="premium-card">
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px' }}>Допустимые действия:</h4>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <h4 style={{ margin: 0, fontSize: '12px' }}>Допустимые действия:</h4>
+                    </div>
+
+                    {!hasCompletionDocs && selectedCase?.current_status === CASE_STATUS.IN_REPAIR && (
+                      <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
+                        ⚠️ Для перевода в «Готов к отправке» прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
+                      </div>
+                    )}
+
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {visibleTransitions.map((st: string) => <button key={st} disabled={loading} onClick={() => handleUpdateStatus(st)} className="btn-primary" style={{ padding: '6px 10px', fontSize: '11px', width: 'auto', background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' }}>{st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}</button>)}
+                      {visibleTransitions.map((st: string) => {
+                        const isReadyAction = st === CASE_STATUS.READY;
+                        const isDisabled = loading || (isReadyAction && !canSendToReady);
+
+                        return (
+                          <button 
+                            key={st} 
+                            disabled={isDisabled} 
+                            onClick={() => handleUpdateStatus(st)} 
+                            className="btn-primary" 
+                            style={{ 
+                              padding: '6px 10px', 
+                              fontSize: '11px', 
+                              width: 'auto', 
+                              opacity: isDisabled ? 0.5 : 1,
+                              background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' 
+                            }}
+                          >
+                            {st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1690,8 +1752,8 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                  {isAdminOrDocs && (
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                  {!isGuest && (
+                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <select 
                         className="select-field" 
                         onPointerDown={(e) => e.stopPropagation()}
@@ -1702,8 +1764,13 @@ export default function App() {
                       >
                         {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
                       </select>
-                      <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док." value={docNumber} onChange={e => setDocNumber(e.target.value)} />
-                      <button className="btn-primary" style={{ width: 'auto', padding: '0 12px' }} onClick={handleAddDocument} disabled={loading}>+</button>
+                      <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док. (необяз.)" value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+                      
+                      <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px' }} onClick={handleAddDocumentTextOnly} disabled={loading}>Текст</button>
+                      <label className="btn-primary" style={{ width: 'auto', padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+                        📷
+                        <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
+                      </label>
                     </div>
                   )}
                 </div>
