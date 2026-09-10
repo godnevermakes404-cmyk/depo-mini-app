@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from './supabase';
 import { 
   STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
@@ -114,10 +114,8 @@ function clearSession() {
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
   
-  // Состояние для тестовой роли
+  // Состояние для тестовой роли (только для ADMIN)
   const [testRole, setTestRole] = useState<string | null>(null);
-  
-  // Если пользователь реально ADMIN, разрешаем применять testRole. Иначе строго user.role
   const activeRole = (user?.role === 'ADMIN' && testRole) ? testRole : (user?.role || 'GUEST');
 
   const [currentTab, setCurrentTab] = useState<AppTab>('home');
@@ -191,6 +189,13 @@ export default function App() {
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
 
+  // Ссылка на открытую карточку для предотвращения потери контекста (stale closure)
+  const selectedCaseRef = useRef<RepairCase | null>(null);
+
+  useEffect(() => {
+    selectedCaseRef.current = selectedCase;
+  }, [selectedCase]);
+
   const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
     try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
   };
@@ -210,13 +215,14 @@ export default function App() {
     initAuthAndData(); 
   }, []);
 
+  // Ультра-быстрый Realtime
   useEffect(() => { 
     if (!user?.id) return;
 
     let t: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefresh = () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => loadData(), 400);
+      t = setTimeout(() => loadData(), 150); // Мгновенный отклик (150ms)
     };
 
     const realtimeChannel = supabase.channel('realtime-depo')
@@ -315,7 +321,7 @@ export default function App() {
     } else {
       saveSession(data.id);
       setUser(data);
-      setTestRole(null); // Сбрасываем тестовую роль при новом логине
+      setTestRole(null);
       setLoginPin('');
       setLoginName('');
       loadData();
@@ -329,24 +335,59 @@ export default function App() {
     setTestRole(null);
   }
 
+  // Параллельная подгрузка всех данных (быстрый отклик)
   async function loadData() {
-    const { data: repairData } = await supabase.from('repair_cases').select(`
+    const activeCaseId = selectedCaseRef.current?.repair_id;
+
+    const [repairRes, delayRes, whRes, usersRes] = await Promise.all([
+      supabase.from('repair_cases').select(`
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
         track_number, position_number, shop_signatures, shop_progress, current_shop,
         contracts ( customer_name, sla_hours ),
         wagons ( id, wagon_number, owner, owner_type )
-      `).order('created_at', { ascending: false });
+      `).order('created_at', { ascending: false }),
+      supabase.from('delay_log').select('*').order('start_datetime', { ascending: false }),
+      supabase.from('warehouse_items').select('*').order('name', { ascending: true }),
+      supabase.from('users').select('*').order('created_at', { ascending: false })
+    ]);
 
-    const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
-    const { data: whItems } = await supabase.from('warehouse_items').select('*').order('name', { ascending: true });
-    const { data: usersList } = await supabase.from('users').select('*').order('created_at', { ascending: false });
-    
-    if (usersList) setAllUsersList(usersList as UserRecord[]);
-    if (whItems) setWarehouseItems(whItems as WarehouseItem[]);
-    if (repairData) {
-      setRepairs(repairData as unknown as RepairCase[]);
-      setDelayLogs(delays as DelayLog[] || []);
-      setDqViolations(runDataQualityChecks(repairData, delays || []));
+    if (usersRes.data) setAllUsersList(usersRes.data as UserRecord[]);
+    if (whRes.data) setWarehouseItems(whRes.data as WarehouseItem[]);
+
+    if (repairRes.data) {
+      const fetchedRepairs = repairRes.data as unknown as RepairCase[];
+      setRepairs(fetchedRepairs);
+      setDelayLogs((delayRes.data as DelayLog[]) || []);
+      setDqViolations(runDataQualityChecks(fetchedRepairs, delayRes.data || []));
+
+      // Если карточка открыта — обновляем её состояние (статусы цехов, подписи и т.д.)
+      if (activeCaseId) {
+        const freshCase = fetchedRepairs.find(r => r.repair_id === activeCaseId);
+        if (freshCase) setSelectedCase(freshCase);
+      }
+    }
+
+    // Если карточка открыта — параллельно подтягиваем свежий журнал, документы и метрики времени
+    if (activeCaseId) {
+      const [eventsRes, docsRes, timeRes] = await Promise.all([
+        supabase.from('status_events').select('*, users(name, role)').eq('repair_id', activeCaseId).order('event_datetime', { ascending: false }),
+        supabase.from('documents').select('*').eq('repair_id', activeCaseId).order('created_at', { ascending: false }),
+        supabase.from('v_repair_time_metrics').select('*').eq('repair_id', activeCaseId).maybeSingle()
+      ]);
+
+      if (eventsRes.data) setStatusHistory(eventsRes.data);
+      if (docsRes.data) setDocuments(docsRes.data);
+      if (timeRes.data) {
+        const gross = Math.max(0, Number(timeRes.data.gross_repair_hours || 0));
+        const paused = Math.max(0, Number(timeRes.data.paused_hours || 0));
+        setSelectedMetrics({
+          total_dwell_hours: Number(Number(timeRes.data.total_dwell_hours || 0).toFixed(1)),
+          queue_hours: Number(Number(timeRes.data.queue_hours || 0).toFixed(1)),
+          gross_repair_hours: Number(gross.toFixed(1)),
+          paused_hours: Number(paused.toFixed(1)),
+          net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
+        } as RepairTimeMetrics);
+      }
     }
   }
 
@@ -455,9 +496,11 @@ export default function App() {
   };
 
   async function openCaseDetails(item: RepairCase) {
-    vibrate('light'); setSelectedCase(item);
+    vibrate('light'); 
+    setSelectedCase(item);
     setEditingWagonNum(item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '' : item.wagons?.wagon_number || '');
 
+    // Быстрая первоначальная загрузка метрик, истории и документов при открытии
     const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
     if (timeMetrics) {
       const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
@@ -470,6 +513,7 @@ export default function App() {
 
     const { data: events } = await supabase.from('status_events').select('*, users(name, role)').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
     if (events) setStatusHistory(events);
+    
     const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
     setDocuments(docs || []);
   }
@@ -572,8 +616,7 @@ export default function App() {
 
     if (!rpcError) {
       alert('📷 Фото акта ВУ-22 успешно загружено!');
-      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
-      setDocuments(docs || []);
+      loadData();
     } else {
       alert('Ошибка сохранения документа: ' + rpcError.message);
     }
@@ -610,8 +653,7 @@ export default function App() {
     if (!rpcError) {
       alert(`📷 Документ "${docType}" успешно прикреплен!`);
       setDocNumber('');
-      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false });
-      setDocuments(docs || []);
+      loadData();
     } else {
       alert('Ошибка сохранения документа: ' + rpcError.message);
     }
@@ -622,7 +664,7 @@ export default function App() {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true); vibrate('medium');
     const signLabel = isNotRequired ? 'Не требуется' : getMasterLabel(shopKey);
-    const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { 
+    const { error } = await supabase.rpc('sign_defect_act', { 
       p_repair_id: selectedCase.repair_id, 
       p_shop_key: shopKey, 
       p_user_name: signLabel, 
@@ -633,7 +675,6 @@ export default function App() {
       if (!isNotRequired) {
         notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
       }
-      setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs }); 
       loadData(); 
     } else {
       alert('Ошибка подписи акта: ' + error.message);
@@ -648,7 +689,7 @@ export default function App() {
     if (!isAllowed || !selectedCase) return;
     setLoading(true);
     const masterLabel = status === 'NOT_REQUIRED' ? 'Не требуется' : getMasterLabel(shopKey);
-    const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { 
+    const { error } = await supabase.rpc('update_shop_stage', { 
       p_repair_id: selectedCase.repair_id, 
       p_shop_key: shopKey, 
       p_status: status, 
@@ -660,7 +701,6 @@ export default function App() {
       if (status !== 'NOT_REQUIRED') {
         notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); 
       }
-      setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey }); 
       loadData(); 
     }
     setLoading(false);
@@ -679,7 +719,7 @@ export default function App() {
     if (!canUploadDocs || !docNumber.trim() || !selectedCase) return;
     setLoading(true); vibrate('light');
     const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: getValidUserId(user), p_file_url: null });
-    if (!error) { setDocNumber(''); const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', selectedCase.repair_id).order('created_at', { ascending: false }); setDocuments(docs || []); } 
+    if (!error) { setDocNumber(''); loadData(); } 
     else { alert('Ошибка: ' + error.message); }
     setLoading(false);
   }
@@ -1994,7 +2034,6 @@ export default function App() {
                         const isTargetReady = isCompletionStatus(st);
                         const isPause = st === CASE_STATUS.PAUSED;
                         
-                        // Запрещаем смену статуса дальше, пока не готовы ВСЕ цеха (кроме установки задержки)
                         const isBlockedByShops = !isPause && !allShopsCompleted;
                         const isDisabled = loading || (isTargetReady && !hasCompletionDocs) || isBlockedByShops;
 
