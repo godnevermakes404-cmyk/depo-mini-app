@@ -195,17 +195,19 @@ export default function App() {
     return uuidRegex.test(u.id) ? u.id : null;
   };
 
-  // 1. ИСПРАВЛЕНИЕ: Строгая проверка на готовность
   const isCompletionStatus = (st: string) => {
     if (!st) return false;
     return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
   };
 
-  // ============================================================
-  // ПОДПИСКА НА ОНЛАЙН-ОБНОВЛЕНИЯ (С DEBOUNCE И ПОЛНЫМ ПОКРЫТИЕМ)
-  // ============================================================
+  // 1. Авторизация (выполняется 1 раз при старте приложения)
   useEffect(() => { 
     initAuthAndData(); 
+  }, []);
+
+  // 2. Подписка Realtime (работает без сброса активной роли при переключении тестов)
+  useEffect(() => { 
+    if (!user?.id) return;
 
     let t: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefresh = () => {
@@ -220,21 +222,14 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wagons' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'status_events' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload: any) => {
-        scheduleRefresh();
-        // Обновляем права пользователя на лету, если Админ изменил их
-        if (payload.new && user && payload.new.id === user.id && payload.new.role !== activeRole) {
-          setActiveRole(payload.new.role || 'GUEST');
-          setUser(prev => prev ? { ...prev, role: payload.new.role } : null);
-        }
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, scheduleRefresh)
       .subscribe();
 
     return () => {
       if (t) clearTimeout(t);
       supabase.removeChannel(realtimeChannel);
     };
-  }, [user?.id, activeRole]);
+  }, [user?.id]);
 
   async function initAuthAndData() {
     let savedUserId = localStorage.getItem('depo_saved_user_id');
@@ -365,18 +360,13 @@ export default function App() {
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
   // ============================================================
-  // 🔐 УСОВЕРШЕНСТВОВАННЫЕ ПРАВА ДОСТУПА (RBAC)
+  // 🔐 ПРАВА ДОСТУПА (RBAC)
   // ============================================================
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
   
-  // Только Оператор и Админ могут менять/присваивать номер вагона
   const canEditWagonNumber = isAdminOrOperator; 
-  
-  // Документооборот, Оператор и Админ могут менять собственника и вид ремонта
   const canEditRepairTypeAndOwner = !isGuest && (isAdminOrOperator || activeRole === 'docs');
-  
-  // Право загружать документы (фото, сканы)
   const canUploadDocs = !isGuest && (isAdminOrOperator || activeRole === 'docs' || activeRole === 'otk');
 
   const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
