@@ -50,15 +50,26 @@ interface UserRecord { id: string; name: string; role: string; telegram_id: stri
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
+// Общий список всех цехов для этапов ремонта
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
   { key: 'brakes', label: 'Автотормозной цех (АКП)' },
-  { key: 'body', label: 'Кузовной / Сварочный' },
+  { key: 'body', label: 'Вагоносборочный цех' },
   { key: 'cooling', label: 'Холодильный цех' },
-  { key: 'electric', label: 'Цех электрооборудования' },
+  { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' },
   { key: 'prep', label: 'Ремонтно-заготовительный цех' },
   { key: 'mech_equip', label: 'Цех механического оборудования' }
+];
+
+// Список цехов строго для подписания Комиссионного Акта ВУ-22 (ШАГ 1)
+const ACT_SIGNING_SHOPS = [
+  { key: 'bogie', label: 'Тележечный цех' },
+  { key: 'wheels', label: 'Колёсный цех' },
+  { key: 'brakes', label: 'Автотормозной цех (АКП)' },
+  { key: 'body', label: 'Вагоносборочный цех' },
+  { key: 'cooling', label: 'Холодильный цех' },
+  { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' }
 ];
 
 const ROLES_LIST = [
@@ -72,9 +83,9 @@ const ROLES_LIST = [
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха — Сирожиддин' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП) — Юсупов' },
-  { key: 'body', label: '🔨 Мастер Кузовного цеха' },
+  { key: 'body', label: '🔨 Мастер Вагоносборочного цеха' },
   { key: 'cooling', label: '❄️ Мастер Холодильного цеха — Алишер' },
-  { key: 'electric', label: '⚡ Мастер электрооборудования — Айдер' },
+  { key: 'electric', label: '⚡ Мастер КПА (Автосцепка) — Айдер' },
   { key: 'prep', label: '📐 Мастер заготовительного цеха — Ровшан' },
   { key: 'mech_equip', label: '⛓️ Мастер мехоборудования — Шоюнус' },
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
@@ -123,9 +134,9 @@ export default function App() {
     bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
     wheels: { label: 'Колёсный цех', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
-    body: { label: 'Кузовной / Сварочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
+    body: { label: 'Вагоносборочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
     cooling: { label: 'Холодильный цех', master: 'Алишер', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
-    electric: { label: 'Цех электрооборудования', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
+    electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
     prep: { label: 'Ремонтно-заготовительный цех', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
     mech_equip: { label: 'Цех механического оборудования', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
     docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
@@ -422,7 +433,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Загрузка фото Акта ВУ-22 (ШАГ 1)
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !selectedCase || isGuest) return;
@@ -460,7 +470,6 @@ export default function App() {
     setLoading(false);
   }
 
-  // Универсальная загрузка любых документов из выпадающего списка
   async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file || !selectedCase || isGuest) return;
@@ -642,13 +651,13 @@ export default function App() {
 
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
-  const allSigned = selectedCase?.shop_signatures && DEFAULT_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
-  // Документы
+  // Проверка подписи акта только по 6 актуальным цехам!
+  const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+  
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
   const hasActPhoto = Boolean(actPhotoDoc);
   
-  // 🎯 Проверка наличия итоговых справок при выпуске
   const hasCompletionDocs = documents.some(d => 
     d.doc_type?.includes('ВУ-23') || d.doc_type?.includes('2612') || d.doc_type?.includes('36М')
   );
@@ -657,7 +666,6 @@ export default function App() {
     ? hasCompletionDocs 
     : true;
 
-  // РАЗГРАНИЧЕНИЕ ПРАВ НА СНЯТИЕ ЗАДЕРЖКИ
   const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
   
   const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
@@ -1054,11 +1062,11 @@ export default function App() {
                 <option value="Холодильный цех">❄️ Холодильный цех</option>
                 <option value="Колёсный цех">⚙️ Колёсный цех</option>
                 <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
-                <option value="Цех электрооборудования">⚡ Цех электрооборудования</option>
+                <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
                 <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
                 <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
                 <option value="Тележечный цех">🔧 Тележечный цех</option>
-                <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
+                <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
               </select>
             </div>
 
@@ -1401,11 +1409,11 @@ export default function App() {
               <option value="Холодильный цех">❄️ Холодильный цех</option>
               <option value="Колёсный цех">⚙️ Колёсный цех</option>
               <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
-              <option value="Цех электрооборудования">⚡ Цех электрооборудования</option>
+              <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
               <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
               <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
               <option value="Тележечный цех">🔧 Тележечный цех</option>
-              <option value="Кузовной / Сварочный">🔨 Кузовной цех</option>
+              <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
             </select>
 
             <div style={{ display: 'flex', gap: '6px' }}>
@@ -1623,7 +1631,7 @@ export default function App() {
                   )}
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {DEFAULT_SHOPS.map(s => {
+                    {ACT_SIGNING_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
                       const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                       const canEdit = canPerformAction(s.key);
