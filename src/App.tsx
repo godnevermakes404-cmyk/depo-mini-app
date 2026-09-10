@@ -72,17 +72,17 @@ const ROLES_LIST = [
   { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
   { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
   { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
-  { key: 'procurement', label: '📦 Снабжение — Рустамжон' },
-  { key: 'mechanic', label: '🛠 Нач. цехов — Абдурахмонжон' },
+  { key: 'procurement', label: '📦 Снабжение' },
+  { key: 'mechanic', label: '🛠 Нач. цехов' },
   { key: 'deputy', label: '👔 Зам. нач. ремонтного цеха' },
-  { key: 'otk', label: '🔍 ОТК — Дилявер' },
+  { key: 'otk', label: '🔍 ОТК' },
   { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
-  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха — Сирожиддин' },
-  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП) — Юсупов' },
+  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
+  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП)' },
   { key: 'body', label: '🔨 Мастер Вагоносборочного цеха' },
-  { key: 'electric', label: '⚡ Мастер КПА (Автосцепка) — Айдер' },
-  { key: 'prep', label: '📐 Мастер заготовительного цеха — Ровшан' },
-  { key: 'mech_equip', label: '⛓️ Мастер мехоборудования — Шоюнус' },
+  { key: 'electric', label: '⚡ Мастер КПА (Автосцепка)' },
+  { key: 'prep', label: '📐 Мастер заготовительного цеха' },
+  { key: 'mech_equip', label: '⛓️ Мастер мехоборудования' },
   { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
 ];
 
@@ -118,19 +118,19 @@ export default function App() {
   const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
   const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
   
-  const [shopMasters, setShopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Рустамжон', tg: '@Rustamjon_5171', role: 'SUPPLY', targetHours: 0 },
-    mechanic: { label: 'Начальник цехов', master: 'Абдурахмонжон', tg: '@Abdyraxmonjon', role: 'MECHANIC', targetHours: 0 },
-    deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Зам. начальника', tg: '@Smets_1964', role: 'DEPUTY', targetHours: 0 },
-    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Дилявер', tg: '@Dilyawer282', role: 'OTK', targetHours: 1 },
-    bogie: { label: 'Тележечный цех', master: 'Иванов И.И.', tg: '@master_bogie', role: 'MASTER', targetHours: 4 },
-    wheels: { label: 'Колёсный цех', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
-    brakes: { label: 'Автотормозной цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
-    body: { label: 'Вагоносборочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
-    electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
-    prep: { label: 'Ремонтно-заготовительный цех', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
-    mech_equip: { label: 'Цех механического оборудования', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
-    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Анна Сергеевна', tg: '@depo_docs_clerk', role: 'CLERK', targetHours: 1 }
+  const [shopMasters] = useState<Record<string, ShopMasterConfig>>({
+    procurement: { label: 'Отдел снабжения / Закупки', master: 'Не назначен', tg: '', role: 'SUPPLY', targetHours: 0 },
+    mechanic: { label: 'Начальник цехов', master: 'Не назначен', tg: '', role: 'MECHANIC', targetHours: 0 },
+    deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Не назначен', tg: '', role: 'DEPUTY', targetHours: 0 },
+    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Не назначен', tg: '', role: 'OTK', targetHours: 1 },
+    bogie: { label: 'Тележечный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
+    wheels: { label: 'Колёсный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+    brakes: { label: 'Автотормозной цех (АКП)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 2 },
+    body: { label: 'Вагоносборочный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 5 },
+    electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+    prep: { label: 'Ремонтно-заготовительный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+    mech_equip: { label: 'Цех механического оборудования', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
+    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Не назначен', tg: '', role: 'CLERK', targetHours: 1 }
   });
 
   const [selectedCase, setSelectedCase] = useState<RepairCase | null>(null);
@@ -176,6 +176,7 @@ export default function App() {
     } catch (e) {}
 
     const hasTgContext = Boolean(window.Telegram?.WebApp) || Boolean(tg?.initData);
+
     if (!hasTgContext && !tgUser) { 
       setIsOutsideTelegram(true); 
       return; 
@@ -193,6 +194,7 @@ export default function App() {
         setUser(dbUser); 
         setActiveRole(dbUser.role || 'GUEST');
       } else {
+        // Все новые пользователи СТРОГО получают роль GUEST
         const { data: newUser } = await supabase
           .from('users')
           .insert([{ telegram_id: tgIdStr, name: fullName, role: 'GUEST' }])
@@ -208,14 +210,8 @@ export default function App() {
         }
       }
     } else {
-      const { data: adminUser } = await supabase.from('users').select('*').eq('role', 'ADMIN').limit(1).maybeSingle();
-      if (adminUser) {
-        setUser(adminUser);
-        setActiveRole(adminUser.role || 'ADMIN');
-      } else {
-        setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
-        setActiveRole('GUEST');
-      }
+      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+      setActiveRole('GUEST');
     }
     loadData();
   }
@@ -229,18 +225,10 @@ export default function App() {
       `).order('created_at', { ascending: false });
 
     const { data: delays } = await supabase.from('delay_log').select('*').order('start_datetime', { ascending: false });
-    const { data: mastersData } = await supabase.from('shop_masters').select('*');
     const { data: whItems } = await supabase.from('warehouse_items').select('*').order('name', { ascending: true });
     const { data: usersList } = await supabase.from('users').select('*').order('created_at', { ascending: false });
     
     if (usersList) setAllUsersList(usersList as UserRecord[]);
-
-    if (mastersData && mastersData.length > 0) {
-      const mapped: Record<string, ShopMasterConfig> = {};
-      mastersData.forEach((m: any) => { mapped[m.shop_key] = { label: m.shop_name, master: m.master_name, tg: m.telegram_handle || '@master', role: m.role_code || 'MASTER', targetHours: Number(m.target_hours || 4) }; });
-      setShopMasters(prev => ({ ...prev, ...mapped }));
-    }
-
     if (whItems) setWarehouseItems(whItems as WarehouseItem[]);
     if (repairData) {
       setRepairs(repairData as unknown as RepairCase[]);
@@ -264,19 +252,22 @@ export default function App() {
   const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
-  const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
-  const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
-
-  async function handleSaveMasters() {
-    setLoading(true); vibrate('heavy');
-    for (const [key, val] of Object.entries(shopMasters)) {
-      const { error } = await supabase.rpc('update_shop_master', {
-        p_shop_key: key, p_shop_name: val.label, p_master_name: val.master, p_tg: val.tg, p_role_code: val.role, p_target_hours: val.targetHours, p_user_id: user?.id || null
-      });
-      if (error) { alert(`Ошибка сохранения ${val.label}: ` + error.message); }
+  // Динамический поиск ответственного по роли из таблицы пользователей
+  const getAssignedMaster = (shopKey: string) => {
+    const assigned = allUsersList.find(u => u.role === shopKey);
+    if (assigned) {
+      return { master: assigned.name, tg: assigned.telegram_id ? `@id${assigned.telegram_id}` : '' };
     }
-    alert('Персонал сохранен!'); setLoading(false); loadData();
-  }
+    const defaultInfo = shopMasters[shopKey];
+    return { master: defaultInfo?.master || 'Не назначен', tg: defaultInfo?.tg || '' };
+  };
+
+  const getMasterLabel = (shopKey: string) => {
+    const info = getAssignedMaster(shopKey);
+    return info.master;
+  };
+
+  const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
 
   async function handleConfirmStockAdjust() {
     if (isGuest || !adjustingItem || !stockDelta.trim()) return;
@@ -560,8 +551,8 @@ export default function App() {
     if (isGuest || !selectedCase) return;
     if (newStatus === CASE_STATUS.PAUSED) { 
       setDelayCategory('Materials');
-      const supplyInfo = shopMasters.procurement;
-      setResponsibleParty(supplyInfo ? `${supplyInfo.master} (${supplyInfo.tg})` : 'Отдел снабжения');
+      const supplyInfo = getAssignedMaster('procurement');
+      setResponsibleParty(supplyInfo.master !== 'Не назначен' ? supplyInfo.master : 'Отдел снабжения');
       setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
     }
     setLoading(true); vibrate('medium');
@@ -674,17 +665,14 @@ export default function App() {
   const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
   const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
 
-  // 🎯 РАЗДЕЛЕНИЕ ПРАВ В СТАТУСЕ "ГОТОВ К ОТПРАВКЕ":
   let visibleTransitions: string[] = [];
   if (!isGuest && selectedCase) {
     if (isPausedState) {
       if (canResumeFromPause) visibleTransitions = availableTransitions;
     } else if (isReadyStatus) {
       if (isAdminOrOperator) {
-        // ОПЕРАТОР / АДМИН: окончательная отправка из депо ИЛИ возврат на доработку / паузу
         visibleTransitions = Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]));
       } else if (activeRole === 'otk') {
-        // ОТК: ТОЛЬКО возврат в ремонт или задержку, без кнопок отправки из депо
         visibleTransitions = [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED];
       }
     } else {
@@ -816,6 +804,8 @@ export default function App() {
               const matCount = activeDelays.filter(d => d.category === 'Materials').length;
               const eqCount = activeDelays.filter(d => d.category === 'Equipment').length;
               const custCount = activeDelays.filter(d => d.category === 'Customer').length;
+              const supplyMaster = getAssignedMaster('procurement').master;
+              const mechanicMaster = getAssignedMaster('mechanic').master;
 
               return (
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)' }}>
@@ -826,11 +816,11 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
                       <span>📦 Запчасти / Материалы: <b>{matCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-secondary)' }}>Отв: Рустамжон</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Отв: {supplyMaster}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
                       <span>🛠 Оборудование: <b>{eqCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-secondary)' }}>Отв: Абдурахмонжон</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Отв: {mechanicMaster}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
                       <span>👤 Ждём решения Заказчика: <b>{custCount} ваг.</b></span>
@@ -1298,32 +1288,10 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>⚙️ Персонал и Нормативы цехов</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {Object.entries(shopMasters).map(([key, val]) => (
-                      <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '6px', background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)' }}>{val.label}</span>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                          <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 110px' }} type="text" value={val.master} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, master: e.target.value } })} placeholder="ФИО" />
-                          <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', flex: '1 1 90px' }} type="text" value={val.tg} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, tg: e.target.value } })} placeholder="@username" />
-                          {key !== 'procurement' && key !== 'mechanic' && key !== 'deputy' && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flex: '1 1 90px' }}>
-                              <input className="input-field" style={{ margin: 0, padding: '6px 8px', fontSize: '11px', width: '50px' }} type="number" step="0.5" value={val.targetHours} onChange={e => setShopMasters({ ...shopMasters, [key]: { ...val, targetHours: Number(e.target.value) } })} placeholder="Норма" />
-                              <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ч.</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                    <button className="btn-primary" style={{ marginTop: '4px' }} onClick={handleSaveMasters} disabled={loading}>💾 Сохранить персонал</button>
-                  </div>
-                </div>
               </>
             ) : (
               <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
-                🔒 Панель управления ролями и персоналом доступна только Начальнику депо.
+                🔒 Панель управления ролями доступна только Начальнику депо.
               </div>
             )}
           </div>
@@ -1583,12 +1551,12 @@ export default function App() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {DEFAULT_SHOPS.map(s => {
                     const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
-                    const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master', targetHours: 4 };
+                    const masterInfo = getAssignedMaster(s.key);
                     const isInProgress = prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
                     const isNotRequired = prog.status === 'NOT_REQUIRED';
                     const canEdit = canPerformAction(s.key);
-                    const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
+                    const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, shopMasters[s.key]?.targetHours || 4);
 
                     return (
                       <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
@@ -1600,7 +1568,7 @@ export default function App() {
                               </span>
                             )}
                           </div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b></div>
                         </div>
                         <div>
                           {isDone ? (
@@ -1675,7 +1643,7 @@ export default function App() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     {ACT_SIGNING_SHOPS.map(s => {
                       const sig = selectedCase.shop_signatures?.[s.key];
-                      const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
+                      const masterInfo = getAssignedMaster(s.key);
                       const canEdit = canPerformAction(s.key);
                       const isNotRequired = sig?.master_name === 'Не требуется';
 
@@ -1683,7 +1651,7 @@ export default function App() {
                         <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
-                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg}){sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
+                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b>{sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
                           </div>
                           {sig?.signed ? (
                             isNotRequired ? <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold' }}>— Не требуется</span> : <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span>
@@ -1888,8 +1856,8 @@ export default function App() {
               value={delayCategory} 
               onChange={e => {
                 const cat = e.target.value; setDelayCategory(cat);
-                if (cat === 'Materials') { const info = shopMasters.procurement; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Отдел снабжения / Закупки'); } 
-                else if (cat === 'Equipment') { const info = shopMasters.mechanic; setResponsibleParty(info ? `${info.master} (${info.tg})` : 'Начальник цеха'); } 
+                if (cat === 'Materials') { const info = getAssignedMaster('procurement'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Отдел снабжения / Закупки'); } 
+                else if (cat === 'Equipment') { const info = getAssignedMaster('mechanic'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Начальник цеха'); } 
                 else { setResponsibleParty(''); }
               }}
             >
