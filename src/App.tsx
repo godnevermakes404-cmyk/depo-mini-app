@@ -733,9 +733,7 @@ export default function App() {
     const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
     return { text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин / Норма: ${targetHours} ч` : `${hoursSpent.toFixed(1)} ч / Норма: ${targetHours} ч`, isOverdue: hoursSpent > targetHours };
   };
-
-  const currentRoleInfo = ROLES_LIST.find(r => r.key === activeRole);
-
+  
   // 🔒 ЭКРАН ВХОДА ПО ПИН-КОДУ
   if (isAuthLocked) {
     return (
