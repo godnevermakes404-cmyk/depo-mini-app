@@ -45,7 +45,7 @@ interface DelayLog {
 }
 interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
 interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
-interface UserRecord { id: string; name: string; role: string; telegram_id: string; pin_code?: string; created_at?: string; }
+interface UserRecord { id: string; name: string; role: string; telegram_id: string; created_at?: string; }
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
@@ -92,11 +92,6 @@ export default function App() {
   const [activeRole, setActiveRole] = useState<string>('GUEST');
   const [showAddModal, setShowAddModal] = useState(false);
   const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
-
-  // Авторизация по ПИН-коду
-  const [isAuthLocked, setIsAuthLocked] = useState<boolean>(true);
-  const [selectedRoleKey, setSelectedRoleKey] = useState<string>('');
-  const [pinInput, setPinInput] = useState<string>('');
 
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -145,6 +140,7 @@ export default function App() {
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
   const [docNumber, setDocNumber] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
 
   const [showDelayModal, setShowDelayModal] = useState(false);
   const [delayCategory, setDelayCategory] = useState('Materials');
@@ -154,7 +150,6 @@ export default function App() {
   const [nextAction, setNextAction] = useState('');
   const [actionDeadline, setActionDeadline] = useState('');
 
-  // Исправлено: значение в формате string для свободной очистки ввода
   const [arrivalCount, setArrivalCount] = useState<string>('1');
   const [editingWagonNum, setEditingWagonNum] = useState<string>('');
 
@@ -174,110 +169,75 @@ export default function App() {
   useEffect(() => { initAuthAndData(); }, []);
 
   async function initAuthAndData() {
-    const { data: usersList } = await supabase.from('users').select('*').order('name', { ascending: true });
-    if (usersList) setAllUsersList(usersList as UserRecord[]);
+    let tgUser: any = null;
+    try {
+      const tg = window.Telegram?.WebApp;
+      if (tg) {
+        tg.ready();
+        tg.expand();
+        tg.setHeaderColor?.('bg_main');
 
-    const savedUserId = localStorage.getItem('depo_active_user_id');
-    const savedRole = localStorage.getItem('depo_active_role');
+        if (tg.initDataUnsafe?.user?.id) {
+          tgUser = tg.initDataUnsafe.user;
+        } else if (tg.initData) {
+          const params = new URLSearchParams(tg.initData);
+          const userJson = params.get('user');
+          if (userJson) tgUser = JSON.parse(userJson);
+        } else if (window.location.hash) {
+          const hashRaw = window.location.hash.replace('#', '');
+          const hashParams = new URLSearchParams(hashRaw);
+          const tgWebAppData = hashParams.get('tgWebAppData');
+          if (tgWebAppData) {
+            const innerParams = new URLSearchParams(tgWebAppData);
+            const userJson = innerParams.get('user');
+            if (userJson) tgUser = JSON.parse(userJson);
+          }
+        }
+      }
+    } catch (e) {}
 
-    if (savedRole) {
-      const activeUser = usersList?.find((u: any) => u.id === savedUserId) || {
-        id: savedUserId || `role_user_${savedRole}`,
-        name: ROLES_LIST.find(r => r.key === savedRole)?.label || 'Пользователь',
-        role: savedRole
-      };
-      setUser(activeUser as any);
-      setActiveRole(savedRole);
-      setIsAuthLocked(false);
-      loadData();
-      return;
-    }
-    setIsAuthLocked(true);
-  }
+    if (tgUser?.id || tgUser?.username) {
+      setIsOutsideTelegram(false);
+      const tgIdStr = tgUser.id ? String(tgUser.id) : '';
+      const fullName = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Сотрудник';
+      const username = tgUser.username?.toLowerCase() || '';
 
-  async function handlePinSubmit() {
-    if (!selectedRoleKey) {
-      alert('Выберите вашу должность или отдел!');
-      return;
-    }
-    if (!pinInput || pinInput.length < 4) {
-      alert('Введите 4 цифры ПИН-кода!');
-      return;
-    }
+      const isOwnerAdmin = username === 'ryme_1';
 
-    setLoading(true);
-    vibrate('medium');
+      let dbUser = null;
+      if (tgIdStr) {
+        const { data } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
+        dbUser = data;
+      }
 
-    const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
-    // Ищем фиксированного пользователя для этого отдела в базе
-    let dbUserForRole = allUsersList.find(u => u.role === selectedRoleKey);
-
-    // Проверка ПИН-кода (2203 для Админа, либо персональный ПИН отдела)
-    const expectedPin = selectedRoleKey === 'ADMIN' 
-      ? '2203' 
-      : (dbUserForRole?.pin_code || '1234');
-
-    const isPinCorrect = pinInput.trim() === expectedPin || pinInput.trim() === '2203';
-
-    if (isPinCorrect) {
-      // Если аккаунта отдела еще нет в БД, создаем его ОДИН РАЗ с валидным UUID
-      if (!dbUserForRole) {
-        const { data: created } = await supabase
+      if (dbUser) {
+        if (isOwnerAdmin && dbUser.role !== 'ADMIN') {
+          await supabase.from('users').update({ role: 'ADMIN' }).eq('id', dbUser.id);
+          dbUser.role = 'ADMIN';
+        }
+        setUser(dbUser); 
+        setActiveRole(dbUser.role || 'GUEST');
+      } else {
+        const targetRole = isOwnerAdmin ? 'ADMIN' : 'GUEST';
+        const { data: newUser } = await supabase
           .from('users')
-          .insert([{ name: roleConfig?.label || selectedRoleKey, role: selectedRoleKey, pin_code: expectedPin }])
+          .insert([{ telegram_id: tgIdStr || username, name: fullName, role: targetRole }])
           .select()
           .single();
-        dbUserForRole = created;
-      }
 
-      if (dbUserForRole) {
-        localStorage.setItem('depo_active_user_id', dbUserForRole.id);
-        localStorage.setItem('depo_active_role', selectedRoleKey);
-        setUser(dbUserForRole);
-        setActiveRole(selectedRoleKey);
-        setIsAuthLocked(false);
-        setPinInput('');
-        loadData();
+        if (newUser) {
+          setUser(newUser);
+          setActiveRole(newUser.role || 'GUEST');
+        } else {
+          setUser({ id: 'guest_temp', name: fullName, role: targetRole, telegram_id: tgIdStr });
+          setActiveRole(targetRole);
+        }
       }
     } else {
-      alert('❌ Неверный ПИН-код!');
-      setPinInput('');
+      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+      setActiveRole('GUEST');
     }
-    setLoading(false);
-  }
-
-    const roleConfig = ROLES_LIST.find(r => r.key === selectedRoleKey);
-    const expectedPin = dbUserForRole?.pin_code || '1234';
-
-    if (pinInput.trim() === expectedPin || pinInput.trim() === '2203') {
-      const activeUser = dbUserForRole || {
-        id: `sys_${selectedRoleKey}`,
-        name: roleConfig?.label || 'Сотрудник',
-        role: selectedRoleKey
-      };
-
-      localStorage.setItem('depo_active_user_id', activeUser.id);
-      localStorage.setItem('depo_active_role', selectedRoleKey);
-      setUser(activeUser as any);
-      setActiveRole(selectedRoleKey);
-      setIsAuthLocked(false);
-      setPinInput('');
-      loadData();
-    } else {
-      alert('❌ Неверный ПИН-код!');
-      setPinInput('');
-    }
-    setLoading(false);
-  }
-
-  function handleLogout() {
-    localStorage.removeItem('depo_active_user_id');
-    localStorage.removeItem('depo_active_role');
-    setUser(null);
-    setActiveRole('GUEST');
-    setIsAuthLocked(true);
-    setSelectedRoleKey('');
-    setPinInput('');
+    loadData();
   }
 
   async function loadData() {
@@ -756,56 +716,15 @@ export default function App() {
     return { text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин / Норма: ${targetHours} ч` : `${hoursSpent.toFixed(1)} ч / Норма: ${targetHours} ч`, isOverdue: hoursSpent > targetHours };
   };
 
-  // 🔒 ЭКРАН ВХОДА ПО ПИН-КОДУ ДЛЯ ВСЕХ ОТДЕЛОВ
-  if (isAuthLocked) {
-    return (
-      <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
-        <div className="premium-card" style={{ maxWidth: '380px', width: '100%', textAlign: 'center', padding: '24px' }}>
-          <h2 style={{ color: 'var(--brand)', margin: '0 0 8px 0', fontSize: '22px', fontWeight: '900' }}>🚂 ДЕПО TMS</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '16px' }}>
-            Выберите вашу должность / цех и введите ПИН-код
-          </p>
-
-          <select 
-            className="select-field" 
-            style={{ marginBottom: '12px', fontSize: '13px', fontWeight: 'bold' }}
-            value={selectedRoleKey}
-            onChange={e => setSelectedRoleKey(e.target.value)}
-          >
-            <option value="">-- Выберите отдел / должность --</option>
-            {ROLES_LIST.map(r => (
-              <option key={r.key} value={r.key}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-
-          <input 
-            className="input-field" 
-            type="password" 
-            maxLength={4} 
-            placeholder="ПИН-код" 
-            value={pinInput} 
-            style={{ textAlign: 'center', fontSize: '22px', letterSpacing: '8px', fontWeight: 'bold', marginBottom: '16px' }}
-            onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
-          />
-
-          <button className="btn-primary" style={{ width: '100%', padding: '12px', fontSize: '14px' }} onClick={handlePinSubmit} disabled={loading}>
-            🔑 Войти в систему
-          </button>
-        </div>
-      </div>
-    );
+  if (isOutsideTelegram) {
+    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
   }
 
   return (
     <div>
       <header className="brand-header">
         <h1 className="brand-title">ДЕПО TMS</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span className="status-pill">{user?.name} {isGuest ? '(Гость)' : ''}</span>
-          <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', color: 'var(--status-paused)' }} onClick={handleLogout}>Выйти ✕</button>
-        </div>
+        <span className="status-pill">{user?.name} {isGuest ? '(Гость)' : ''}</span>
       </header>
 
       <div className="content-area">
@@ -817,7 +736,7 @@ export default function App() {
               <div>
                 <div style={{ fontWeight: '800', fontSize: '12px', color: 'var(--status-queue)' }}>Режим наблюдения (Гость)</div>
                 <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Вы зашли в режиме наблюдения. Обратитесь к Начальнику депо для получения прав.
+                  Вы зашли впервые. Обратитесь к Начальнику депо для получения доступа.
                 </div>
               </div>
             </div>
@@ -1322,7 +1241,10 @@ export default function App() {
             <div className="premium-card" style={{ textAlign: 'center' }}>
               <h3 style={{ margin: '0 0 4px 0' }}>{user?.name}</h3>
               <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                Текущая роль: <b>{ROLES_LIST.find(r => r.key === activeRole)?.label || activeRole}</b>
+                Текущая роль: <b>{ROLES_LIST.find(r => r.key === activeRole)?.label || activeRole}</b> <br />
+                <span style={{ color: 'var(--brand)', fontWeight: '600' }}>
+                  Telegram ID: {user?.telegram_id || 'Не определен'}
+                </span>
               </p>
             </div>
 
@@ -1347,7 +1269,7 @@ export default function App() {
                 )}
 
                 <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Переключение режима роли (Тестирование)</h4>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Быстрая симуляция роли (Тестирование)</h4>
                   <select 
                     className="select-field" 
                     onPointerDown={(e) => e.stopPropagation()}
@@ -1361,50 +1283,55 @@ export default function App() {
                 </div>
 
                 <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>⚙️ Настройка ПИН-кодов для отделов и цехов</h4>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Управление ролями сотрудников</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => {
-                      const dbUser = allUsersList.find(u => u.role === r.key);
-                      const currentPin = dbUser?.pin_code || (r.key === 'ADMIN' ? '2203' : '1234');
-
-                      return (
-                        <div key={r.key} style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
-                          <div style={{ fontWeight: 'bold', fontSize: '12px', marginBottom: '6px' }}>
-                            {r.label}
-                          </div>
-                          
-                          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>ПИН-код:</span>
-                            <input
-                              className="input-field"
-                              type="text"
-                              maxLength={4}
-                              style={{ width: '80px', margin: 0, fontSize: '12px', textAlign: 'center', fontWeight: 'bold' }}
-                              placeholder="1234"
-                              defaultValue={currentPin}
-                              onBlur={async (e) => {
-                                const newPin = e.target.value.trim();
-                                if (newPin.length === 4) {
-                                  if (dbUser) {
-                                    await supabase.from('users').update({ pin_code: newPin }).eq('id', dbUser.id);
-                                  } else {
-                                    await supabase.from('users').insert([{ role: r.key, name: r.label, pin_code: newPin }]);
-                                  }
-                                  alert(`Новый ПИН-код ${newPin} сохранен для ${r.label}!`);
-                                  loadData();
-                                }
-                              }}
-                            />
-                          </div>
+                    {allUsersList.map(u => (
+                      <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
+                        <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                          <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
                         </div>
-                      );
-                    })}
+                        
+                        <select
+                          className="select-field"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ margin: 0, fontSize: '11px', fontWeight: '600' }}
+                          value={u.role || 'GUEST'}
+                          onChange={async (e) => {
+                            const newRole = e.target.value;
+                            setLoading(true);
+                            vibrate('medium');
+
+                            const { error } = await supabase.rpc('update_user_role', {
+                              p_target_user_id: u.id,
+                              p_new_role: newRole
+                            });
+
+                            if (!error) {
+                              alert(`Права для ${u.name} изменены на: ${newRole}`);
+                              setAllUsersList(prev => prev.map(userItem => 
+                                userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                              ));
+                              loadData();
+                            } else {
+                              alert('Ошибка изменения роли: ' + error.message);
+                            }
+                            setLoading(false);
+                          }}
+                        >
+                          {ROLES_LIST.map(r => (
+                            <option key={r.key} value={r.key}>{r.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </>
             ) : (
               <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
-                🔒 Панель управления паролями и ролями доступна только Начальнику депо.
+                🔒 Панель управления ролями доступна только Начальнику депо.
               </div>
             )}
           </div>
