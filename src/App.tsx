@@ -215,7 +215,6 @@ export default function App() {
   useEffect(() => { 
     initAuthAndData(); 
 
-    // Включаем Realtime (Мгновенное обновление данных у всех пользователей)
     const realtimeChannel = supabase.channel('realtime-depo')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, () => loadData())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, () => loadData())
@@ -355,13 +354,21 @@ export default function App() {
 
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
+  // ============================================================
+  // 🔐 ЖЕСТКОЕ РАЗГРАНИЧЕНИЕ ПРАВ ДОСТУПА (RBAC)
+  // ============================================================
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  // ДОБАВЛЕНО ПРАВО РЕДАКТИРОВАНИЯ ТИПА РЕМОНТА ДЛЯ ДОКУМЕНТООБОРОТА
-  const canEditWagonDetails = isAdminOrOperator || activeRole === 'docs'; 
   
-  const canManageStatus = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator' || activeRole === 'otk');
-  const canPerformAction = (targetShopKey: string) => !isGuest && (canManageStatus || activeRole === targetShopKey);
+  // Документооборот (docs), Админ и Оператор могут редактировать вагоны (номер, вид ремонта, собственник)
+  const canEditWagonDetails = !isGuest && (isAdminOrOperator || activeRole === 'docs'); 
+  
+  // Управление глобальным статусом вагона (В ремонт, Готов, Задержан)
+  const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
+  
+  // Кнопки конкретного цеха могут нажимать ТОЛЬКО мастер этого цеха, Админ или Оператор (ОТК не имеет доступа!)
+  const canPerformAction = (targetShopKey: string) => !isGuest && (isAdminOrOperator || activeRole === targetShopKey);
+  
   const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
   const getAssignedMaster = (shopKey: string) => {
@@ -1683,8 +1690,8 @@ export default function App() {
               <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
             </div>
 
-            {/* БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА */}
-            {isAdminOrOperator && (
+            {/* БЛОК ВВОДА РЕАЛЬНОГО 8-ЗНАЧНОГО НОМЕРА ВАГОНА ДЛЯ ОПЕРАТОРА / ДОКУМЕНТООБОРОТА */}
+            {canEditWagonDetails && (
               <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
                 <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
                   {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '✏️ Присвоить реальный 8-значный номер вагона:' : '✏️ Изменить номер вагона:'}
