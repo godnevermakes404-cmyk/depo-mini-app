@@ -2126,3 +2126,33 @@ export default function App() {
     </div>
   );
 }
+const IS_DEV = import.meta.env.DEV;
+
+// ... внутри компонента App():
+const [testRole, setTestRole] = useState<string | null>(null);
+
+// В Продакшене activeRole ВСЕГДА равен user.role из базы данных.
+// Тестирование кликом работает ТОЛЬКО в режим разработки (import.meta.env.DEV).
+const activeRole = (IS_DEV && testRole) ? testRole : (user?.role || 'GUEST');
+
+async function handleRoleChange(newRole: string) {
+  if (IS_DEV) {
+    setTestRole(newRole);
+    vibrate('medium');
+  }
+}
+{IS_DEV && user?.role === 'ADMIN' && (
+  <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>
+      🧪 Переключение режима роли (ТОЛЬКО DEV)
+    </h4>
+    <select 
+      className="select-field" 
+      style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
+      value={activeRole} 
+      onChange={e => handleRoleChange(e.target.value)}
+    >
+      {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+    </select>
+  </div>
+)}
