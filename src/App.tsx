@@ -50,25 +50,23 @@ interface UserRecord { id: string; name: string; role: string; telegram_id: stri
 
 const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
-// Общий список всех цехов для этапов ремонта
+// Общий список цехов для этапов ремонта
 const DEFAULT_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
   { key: 'brakes', label: 'Автотормозной цех (АКП)' },
   { key: 'body', label: 'Вагоносборочный цех' },
-  { key: 'cooling', label: 'Холодильный цех' },
   { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' },
   { key: 'prep', label: 'Ремонтно-заготовительный цех' },
   { key: 'mech_equip', label: 'Цех механического оборудования' }
 ];
 
-// Список цехов строго для подписания Комиссионного Акта ВУ-22 (ШАГ 1)
+// Список цехов для подписания Комиссионного Акта ВУ-22 (ШАГ 1)
 const ACT_SIGNING_SHOPS = [
   { key: 'bogie', label: 'Тележечный цех' },
   { key: 'wheels', label: 'Колёсный цех' },
   { key: 'brakes', label: 'Автотормозной цех (АКП)' },
   { key: 'body', label: 'Вагоносборочный цех' },
-  { key: 'cooling', label: 'Холодильный цех' },
   { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' }
 ];
 
@@ -84,7 +82,6 @@ const ROLES_LIST = [
   { key: 'wheels', label: '⚙️ Мастер Колёсного цеха — Сирожиддин' },
   { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП) — Юсупов' },
   { key: 'body', label: '🔨 Мастер Вагоносборочного цеха' },
-  { key: 'cooling', label: '❄️ Мастер Холодильного цеха — Алишер' },
   { key: 'electric', label: '⚡ Мастер КПА (Автосцепка) — Айдер' },
   { key: 'prep', label: '📐 Мастер заготовительного цеха — Ровшан' },
   { key: 'mech_equip', label: '⛓️ Мастер мехоборудования — Шоюнус' },
@@ -111,7 +108,7 @@ export default function App() {
   const [showItemModal, setShowItemModal] = useState<boolean>(false);
   const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
   const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState('Холодильный цех');
+  const [itemCategory, setItemCategory] = useState('Тележечный цех');
   const [itemQty, setItemQty] = useState('10');
   const [itemUnit, setItemUnit] = useState('шт');
   const [itemMinLimit, setItemMinLimit] = useState('5');
@@ -135,7 +132,6 @@ export default function App() {
     wheels: { label: 'Колёсный цех', master: 'Сирожиддин', tg: '@Sirojiddin_5171', role: 'MASTER', targetHours: 3 },
     brakes: { label: 'Автотормозной цех (АКП)', master: 'Юсупов', tg: '@Yusupov_75_11', role: 'MASTER', targetHours: 2 },
     body: { label: 'Вагоносборочный цех', master: 'Кузнецов К.К.', tg: '@master_body', role: 'MASTER', targetHours: 5 },
-    cooling: { label: 'Холодильный цех', master: 'Алишер', tg: '@master_cooling', role: 'MASTER', targetHours: 4 },
     electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Айдер', tg: '@Ayder_1987', role: 'MASTER', targetHours: 3 },
     prep: { label: 'Ремонтно-заготовительный цех', master: 'Ровшан', tg: '@Rovshan_13', role: 'MASTER', targetHours: 3 },
     mech_equip: { label: 'Цех механического оборудования', master: 'Шоюнус', tg: '@Shoyunus_1968', role: 'MASTER', targetHours: 4 },
@@ -268,9 +264,9 @@ export default function App() {
   async function handleRoleChange(newRole: string) { setActiveRole(newRole); vibrate('medium'); }
   
   const isGuest = activeRole === 'GUEST';
-  const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
-  const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
+  const canPerformAction = (targetShopKey: string) => !isGuest && (isAdminOrOperator || activeRole === targetShopKey);
+  const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
 
   const getMasterLabel = (shopKey: string) => { const info = shopMasters[shopKey]; return info ? `${info.master} (${info.tg})`.trim() : 'Мастер'; };
   const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
@@ -340,7 +336,7 @@ export default function App() {
     if (item) {
       setEditingItem(item); setItemName(item.name); setItemCategory(item.category); setItemQty(String(item.quantity)); setItemUnit(item.unit); setItemMinLimit(String(item.min_limit));
     } else {
-      setEditingItem(null); setItemName(''); setItemCategory('Холодильный цех'); setItemQty('10'); setItemUnit('шт'); setItemMinLimit('5');
+      setEditingItem(null); setItemName(''); setItemCategory('Тележечный цех'); setItemQty('10'); setItemUnit('шт'); setItemMinLimit('5');
     }
     setShowItemModal(true);
   };
@@ -508,10 +504,11 @@ export default function App() {
     setLoading(false);
   }
 
-  async function handleSignAct(shopKey: string) {
+  // Подпись или пропуск (Н/Т) в Акте ВУ-22
+  async function handleSignAct(shopKey: string, isNotRequired: boolean = false) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true); vibrate('medium');
-    const signLabel = getMasterLabel(shopKey);
+    const signLabel = isNotRequired ? 'Не требуется' : getMasterLabel(shopKey);
     const { data: updatedSigs, error } = await supabase.rpc('sign_defect_act', { 
       p_repair_id: selectedCase.repair_id, 
       p_shop_key: shopKey, 
@@ -520,7 +517,9 @@ export default function App() {
     });
 
     if (!error) { 
-      notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
+      if (!isNotRequired) {
+        notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
+      }
       setSelectedCase({ ...selectedCase, shop_signatures: updatedSigs }); 
       loadData(); 
     } else {
@@ -532,9 +531,15 @@ export default function App() {
   async function handleUpdateShopStage(shopKey: string, status: string) {
     if (!canPerformAction(shopKey) || !selectedCase) return;
     setLoading(true);
-    const masterLabel = getMasterLabel(shopKey);
+    const masterLabel = status === 'NOT_REQUIRED' ? 'Не требуется' : getMasterLabel(shopKey);
     const { data: updatedProgress, error } = await supabase.rpc('update_shop_stage', { p_repair_id: selectedCase.repair_id, p_shop_key: shopKey, p_status: status, p_master_name: masterLabel, p_user_id: user?.id || null });
-    if (!error) { notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey }); loadData(); }
+    if (!error) { 
+      if (status !== 'NOT_REQUIRED') {
+        notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); 
+      }
+      setSelectedCase({ ...selectedCase, shop_progress: updatedProgress, current_shop: shopKey }); 
+      loadData(); 
+    }
     setLoading(false);
   }
 
@@ -652,7 +657,7 @@ export default function App() {
   const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
   const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
   
-  // Проверка подписи акта только по 6 актуальным цехам!
+  // Проверка подписи акта строго по 5 актуальным цехам!
   const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
   const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
@@ -936,7 +941,7 @@ export default function App() {
                   <option value="">Все статусы</option>
                   <option value={CASE_STATUS.QUEUE}>В очереди</option>
                   <option value={CASE_STATUS.IN_REPAIR}>В ремонте</option>
-                  <option value={CASE_STATUS.PAUSED}>Задержано</option>
+                  <option value={CASE_STATUS.PAUSED}>За задержано</option>
                   <option value={CASE_STATUS.READY}>Готов к отправке</option>
                 </select>
 
@@ -1059,13 +1064,12 @@ export default function App() {
                 onChange={e => setWarehouseCatFilter(e.target.value || null)}
               >
                 <option value="">Все цеха и категории</option>
-                <option value="Холодильный цех">❄️ Холодильный цех</option>
+                <option value="Тележечный цех">🔧 Тележечный цех</option>
                 <option value="Колёсный цех">⚙️ Колёсный цех</option>
                 <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
                 <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
                 <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
                 <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
-                <option value="Тележечный цех">🔧 Тележечный цех</option>
                 <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
               </select>
             </div>
@@ -1406,13 +1410,12 @@ export default function App() {
               value={itemCategory} 
               onChange={e => setItemCategory(e.target.value)}
             >
-              <option value="Холодильный цех">❄️ Холодильный цех</option>
+              <option value="Тележечный цех">🔧 Тележечный цех</option>
               <option value="Колёсный цех">⚙️ Колёсный цех</option>
               <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
               <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
               <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
               <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
-              <option value="Тележечный цех">🔧 Тележечный цех</option>
               <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
             </select>
 
@@ -1572,6 +1575,7 @@ export default function App() {
                     const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master', targetHours: 4 };
                     const isInProgress = prog.status === 'IN_PROGRESS';
                     const isDone = prog.status === 'DONE';
+                    const isNotRequired = prog.status === 'NOT_REQUIRED';
                     const canEdit = canPerformAction(s.key);
                     const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, masterInfo.targetHours);
 
@@ -1579,19 +1583,32 @@ export default function App() {
                       <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                         <div>
                           <div style={{ fontWeight: 'bold' }}>{s.label}
-                            <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
-                              ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
-                            </span>
+                            {!isNotRequired && (
+                              <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
+                                ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
+                              </span>
+                            )}
                           </div>
                           <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b> (<a href={`https://t.me/${masterInfo.tg.replace('@', '')}`} target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', textDecoration: 'none' }}>{masterInfo.tg}</a>)</div>
                         </div>
                         <div>
                           {isDone ? (
                             <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                          ) : isNotRequired ? (
+                            <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold', fontSize: '10px' }}>— Не требуется</span>
                           ) : isInProgress ? (
-                            canEdit ? <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button> : <span style={{ color: 'var(--brand)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
+                            canEdit ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button>
+                              </div>
+                            ) : <span style={{ color: 'var(--brand)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
                           ) : (
-                            canEdit ? <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button> : <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>⏳ Ожидает</span>
+                            canEdit ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button>
+                                <button className="btn-secondary" style={{ padding: '3px 6px', fontSize: '10px', width: 'auto', color: 'var(--text-secondary)' }} onClick={() => handleUpdateShopStage(s.key, 'NOT_REQUIRED')} disabled={loading}>Н/Т</button>
+                              </div>
+                            ) : <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>⏳ Ожидает</span>
                           )}
                         </div>
                       </div>
@@ -1635,13 +1652,24 @@ export default function App() {
                       const sig = selectedCase.shop_signatures?.[s.key];
                       const masterInfo = shopMasters[s.key] || { master: 'Мастер', tg: '@master' };
                       const canEdit = canPerformAction(s.key);
+                      const isNotRequired = sig?.master_name === 'Не требуется';
+
                       return (
                         <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
                             <b>{s.label}</b>
                             <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b> ({masterInfo.tg}){sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
                           </div>
-                          {sig?.signed ? <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span> : (canEdit ? <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key)} disabled={loading}>Подписать</button> : <span style={{ color: 'var(--status-queue)', fontSize: '10px' }}>⏳ Ожидает</span>)}
+                          {sig?.signed ? (
+                            isNotRequired ? <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold' }}>— Не требуется</span> : <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span>
+                          ) : (
+                            canEdit ? (
+                              <div style={{ display: 'flex', gap: '4px' }}>
+                                <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, false)} disabled={loading}>Подписать</button>
+                                <button className="btn-secondary" style={{ width: 'auto', padding: '4px 6px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, true)} disabled={loading}>Н/Т</button>
+                              </div>
+                            ) : <span style={{ color: 'var(--status-queue)', fontSize: '10px' }}>⏳ Ожидает</span>
+                          )}
                         </div>
                       );
                     })}
@@ -1654,7 +1682,7 @@ export default function App() {
                   
                   {(!allSigned || !hasActPhoto) && (
                     <div style={{ fontSize: '11px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
-                      ⚠️ Завоз доступен после подписи акта всеми мастерами И загрузки фото Акта ВУ-22.
+                      ⚠️ Завоз доступен после подписи акта всеми цехами (или отметки Н/Т) И загрузки фото Акта ВУ-22.
                     </div>
                   )}
                   
