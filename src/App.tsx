@@ -111,6 +111,47 @@ function clearSession() {
   try { window.Telegram?.WebApp?.CloudStorage?.removeItem('depo_saved_user_id', () => {}); } catch (e) {}
 }
 
+// Расчет чистого рабочего времени в окне с 08:00 до 17:00
+function getWorkingHoursSpent(startAt: string | null, endAt: string | null): number {
+  if (!startAt) return 0;
+
+  const start = new Date(startAt);
+  const end = endAt ? new Date(endAt) : new Date();
+
+  if (start >= end) return 0;
+
+  const WORK_START = 8;
+  const WORK_END = 17;
+
+  let totalMs = 0;
+  let current = new Date(start.getTime());
+
+  while (current < end) {
+    const dayStart = new Date(current);
+    dayStart.setHours(WORK_START, 0, 0, 0);
+
+    const dayEnd = new Date(current);
+    dayEnd.setHours(WORK_END, 0, 0, 0);
+
+    if (current < dayStart) {
+      current = dayStart;
+    }
+
+    if (current < dayEnd && current < end) {
+      const chunkEnd = end < dayEnd ? end : dayEnd;
+      totalMs += chunkEnd.getTime() - current.getTime();
+      current = chunkEnd;
+    }
+
+    const nextDay = new Date(current);
+    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setHours(WORK_START, 0, 0, 0);
+    current = nextDay;
+  }
+
+  return Math.max(0, totalMs / (1000 * 60 * 60));
+}
+
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
   
@@ -595,7 +636,7 @@ export default function App() {
     setLoading(false);
   }
 
-  // МАССОВАЯ ЗАГРУЗКА ФОТО АКТА ВУ-22 (С поддержкой 5-10+ фото)
+  // МАССОВАЯ ЗАГРУЗКА ФОТО АКТА ВУ-22
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
     const files = event.target.files ? Array.from(event.target.files) : [];
     if (files.length === 0 || !selectedCase || !canUploadDocs) return;
@@ -891,11 +932,12 @@ export default function App() {
     }
   }
 
+  // Расчет рабочих часов (08:00 - 17:00)
   const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
-    const startTime = startAt ? new Date(startAt).getTime() : null;
-    const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
-    if (!startTime) return { text: '', isOverdue: false };
-    const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+    if (!startAt) return { text: '', isOverdue: false };
+
+    const hoursSpent = getWorkingHoursSpent(startAt, endAt);
+
     return { 
       text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`, 
       isOverdue: targetHours > 0 ? hoursSpent > targetHours : false 
