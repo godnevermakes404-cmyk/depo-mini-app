@@ -44,6 +44,7 @@ export function notifyWagonsArrivedBulk(
 `🛡 <b>ОХРАНА: ПРИХОД СОСТАВА С КПП</b>
 ───────────────
 <b>Количество:</b> ${countText}${registrarText}
+<b>Тип:</b> ${wagonType}
 <b>Вид ремонта:</b> <b>${repairType}</b>
 <b>Собственник:</b> ${owner}
 
