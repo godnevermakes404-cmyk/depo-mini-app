@@ -1,1380 +1,1703 @@
-import { useEffect, useState, useRef } from 'react';
-import { supabase } from './supabase';
-import { 
-  STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
-  runDataQualityChecks, calculateLostWagonDays,
-  type DQViolation, type RepairTimeMetrics 
-} from './depoEngine';
-import { 
-  notifyWagonsArrivedBulk, notifyActSigned, notifyPositionAssigned, 
-  notifyShopStageUpdated, notifyDelayRegistered, notifyStatusChanged 
-} from './telegramNotifier';
-import './App.css';
+  import { useEffect, useState, useRef } from 'react';
+  import { supabase } from './supabase';
+  import { 
+    STATUS_RU, ALLOWED_TRANSITIONS, ON_SITE_STATUSES,
+    runDataQualityChecks, calculateLostWagonDays,
+    type DQViolation, type RepairTimeMetrics 
+  } from './depoEngine';
+  import { 
+    notifyWagonsArrivedBulk, notifyActSigned, notifyPositionAssigned, 
+    notifyShopStageUpdated, notifyDelayRegistered, notifyStatusChanged 
+  } from './telegramNotifier';
+  import './App.css';
 
-declare global { interface Window { Telegram: any; } }
+  declare global { interface Window { Telegram: any; } }
 
-type AppTab = 'home' | 'wagons' | 'warehouse' | 'analytics' | 'profile';
+  type AppTab = 'home' | 'wagons' | 'warehouse' | 'analytics' | 'profile';
 
-export const CASE_STATUS = {
-  PLANNED: '01 PLANNED',
-  QUEUE: '04 QUEUE',
-  IN_REPAIR: '07 IN_REPAIR',
-  PAUSED: '08 REPAIR_PAUSED',
-  READY: '11 READY_TO_DISPATCH'
-} as const;
+  export const CASE_STATUS = {
+    PLANNED: '01 PLANNED',
+    QUEUE: '04 QUEUE',
+    IN_REPAIR: '07 IN_REPAIR',
+    PAUSED: '08 REPAIR_PAUSED',
+    READY: '11 READY_TO_DISPATCH'
+  } as const;
 
-const CATEGORY_RU: Record<string, string> = {
-  'Materials': '📦 Материалы / Запчасти',
-  'Equipment': '🛠 Поломка оборудования',
-  'Customer': '👤 Заказчик',
-  'Railway': '🚂 Железная дорога (ЖД)'
-};
+  const CATEGORY_RU: Record<string, string> = {
+    'Materials': '📦 Материалы / Запчасти',
+    'Equipment': '🛠 Поломка оборудования',
+    'Customer': '👤 Заказчик',
+    'Railway': '🚂 Железная дорога (ЖД)'
+  };
 
-interface Wagon { id?: string; wagon_number: string; owner: string; owner_type: string; }
-interface Contract { customer_name: string; sla_hours: number; }
-interface RepairCase {
-  repair_id: string; current_status: string; repair_type: string; created_at: string;
-  sla_deadline: string | null; planned_release: string | null; forecast_release: string | null;
-  track_number: string | null; position_number: string | null;
-  shop_signatures: Record<string, any>; shop_progress: Record<string, any>; current_shop: string | null;
-  contracts: Contract | any; wagons: Wagon | any; status_events?: any[];
-}
-interface DelayLog {
-  id: string; repair_id: string; category: string; delay_type: string; cause: string;
-  responsible_party: string; start_datetime: string; end_datetime: string | null; next_action: string | null;
-}
-interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
-interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
-interface UserRecord { id: string; name: string; role: string; telegram_id: string; created_at?: string; }
+  interface Wagon { id?: string; wagon_number: string; owner: string; owner_type: string; }
+  interface Contract { customer_name: string; sla_hours: number; }
+  interface RepairCase {
+    repair_id: string; current_status: string; repair_type: string; created_at: string;
+    sla_deadline: string | null; planned_release: string | null; forecast_release: string | null;
+    track_number: string | null; position_number: string | null;
+    shop_signatures: Record<string, any>; shop_progress: Record<string, any>; current_shop: string | null;
+    contracts: Contract | any; wagons: Wagon | any; status_events?: any[];
+  }
+  interface DelayLog {
+    id: string; repair_id: string; category: string; delay_type: string; cause: string;
+    responsible_party: string; start_datetime: string; end_datetime: string | null; next_action: string | null;
+  }
+  interface ShopMasterConfig { label: string; master: string; tg: string; role: string; targetHours: number; }
+  interface WarehouseItem { id: string; name: string; category: string; quantity: number; unit: string; min_limit: number; }
+  interface UserRecord { id: string; name: string; role: string; telegram_id: string; created_at?: string; }
 
-const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
+  const DOCUMENT_TYPES = ['Справка ВУ 36М', 'АКТ ВУ-23 (Ремонт завершен)', 'АКТ ВУ-22 (Дефектная ведомость)', 'Справка 2612', 'Справка 2602', 'Акт дефектации'];
 
-const DEFAULT_SHOPS = [
-  { key: 'bogie', label: 'Тележечный цех' },
-  { key: 'wheels', label: 'Колёсный цех' },
-  { key: 'brakes', label: 'Автотормозной цех (АКП)' },
-  { key: 'body', label: 'Вагоносборочный цех' },
-  { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' },
-  { key: 'prep', label: 'Ремонтно-заготовительный цех' },
-  { key: 'mech_equip', label: 'Цех механического оборудования' }
-];
+  const DEFAULT_SHOPS = [
+    { key: 'bogie', label: 'Тележечный цех' },
+    { key: 'wheels', label: 'Колёсный цех' },
+    { key: 'brakes', label: 'Автотормозной цех (АКП)' },
+    { key: 'body', label: 'Вагоносборочный цех' },
+    { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' },
+    { key: 'prep', label: 'Ремонтно-заготовительный цех' },
+    { key: 'mech_equip', label: 'Цех механического оборудования' }
+  ];
 
-const ACT_SIGNING_SHOPS = [
-  { key: 'bogie', label: 'Тележечный цех' },
-  { key: 'wheels', label: 'Колёсный цех' },
-  { key: 'brakes', label: 'Автотормозной цех (АКП)' },
-  { key: 'body', label: 'Вагоносборочный цех' },
-  { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' }
-];
+  const ACT_SIGNING_SHOPS = [
+    { key: 'bogie', label: 'Тележечный цех' },
+    { key: 'wheels', label: 'Колёсный цех' },
+    { key: 'brakes', label: 'Автотормозной цех (АКП)' },
+    { key: 'body', label: 'Вагоносборочный цех' },
+    { key: 'electric', label: 'Контрольный пункт автосцепки (КПА)' }
+  ];
 
-const ROLES_LIST = [
-  { key: 'GUEST', label: '⏳ Гость (Без доступа)' },
-  { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
-  { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
-  { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
-  { key: 'procurement', label: '📦 Снабжение' },
-  { key: 'mechanic', label: '🛠 Нач. цехов' },
-  { key: 'deputy', label: '👔 Зам. нач. ремонтного цеха' },
-  { key: 'otk', label: '🔍 ОТК' },
-  { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
-  { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
-  { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП)' },
-  { key: 'body', label: '🔨 Мастер Вагоносборочного цеха' },
-  { key: 'electric', label: '⚡ Мастер КПА (Автосцепка)' },
-  { key: 'prep', label: '📐 Мастер заготовительного цеха' },
-  { key: 'mech_equip', label: '⛓️ Мастер мехоборудования' },
-  { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
-];
+  const ROLES_LIST = [
+    { key: 'GUEST', label: '⏳ Гость (Без доступа)' },
+    { key: 'ADMIN', label: '👑 Начальник депо (Полный доступ)' },
+    { key: 'operator', label: '👨‍💻 Оператор / Диспетчер' },
+    { key: 'security', label: '🛡️ Охрана КПП (Приемка вагонов)' },
+    { key: 'procurement', label: '📦 Снабжение' },
+    { key: 'mechanic', label: '🛠 Нач. цехов' },
+    { key: 'deputy', label: '👔 Зам. нач. ремонтного цеха' },
+    { key: 'otk', label: '🔍 ОТК' },
+    { key: 'bogie', label: '🔧 Мастер Тележечного цеха' },
+    { key: 'wheels', label: '⚙️ Мастер Колёсного цеха' },
+    { key: 'brakes', label: '🛑 Мастер Автотормозного цеха (АКП)' },
+    { key: 'body', label: '🔨 Мастер Вагоносборочного цеха' },
+    { key: 'electric', label: '⚡ Мастер КПА (Автосцепка)' },
+    { key: 'prep', label: '📐 Мастер заготовительного цеха' },
+    { key: 'mech_equip', label: '⛓️ Мастер мехоборудования' },
+    { key: 'docs', label: '📄 Оформитель актов (Делопроизводитель)' }
+  ];
 
-function readCloudStorage(key: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    try {
-      const cloud = window.Telegram?.WebApp?.CloudStorage;
-      if (!cloud) { resolve(null); return; }
-      cloud.getItem(key, (err: any, value: string) => {
-        if (err || !value) resolve(null);
-        else resolve(value);
-      });
-    } catch (e) {
-      resolve(null);
-    }
-  });
-}
-
-function saveSession(userId: string) {
-  try { localStorage.setItem('depo_saved_user_id', userId); } catch (e) {}
-  try { window.Telegram?.WebApp?.CloudStorage?.setItem('depo_saved_user_id', userId, () => {}); } catch (e) {}
-}
-
-function clearSession() {
-  try { localStorage.removeItem('depo_saved_user_id'); } catch (e) {}
-  try { window.Telegram?.WebApp?.CloudStorage?.removeItem('depo_saved_user_id', () => {}); } catch (e) {}
-}
-
-// Расчет чистого рабочего времени в окне с 08:00 до 17:00
-function getWorkingHoursSpent(startAt: string | null, endAt: string | null): number {
-  if (!startAt) return 0;
-
-  const start = new Date(startAt);
-  const end = endAt ? new Date(endAt) : new Date();
-
-  if (start >= end) return 0;
-
-  const WORK_START = 8;
-  const WORK_END = 17;
-
-  let totalMs = 0;
-  let current = new Date(start.getTime());
-
-  while (current < end) {
-    const dayStart = new Date(current);
-    dayStart.setHours(WORK_START, 0, 0, 0);
-
-    const dayEnd = new Date(current);
-    dayEnd.setHours(WORK_END, 0, 0, 0);
-
-    if (current < dayStart) {
-      current = dayStart;
-    }
-
-    if (current < dayEnd && current < end) {
-      const chunkEnd = end < dayEnd ? end : dayEnd;
-      totalMs += chunkEnd.getTime() - current.getTime();
-      current = chunkEnd;
-    }
-
-    const nextDay = new Date(current);
-    nextDay.setDate(nextDay.getDate() + 1);
-    nextDay.setHours(WORK_START, 0, 0, 0);
-    current = nextDay;
+  function readCloudStorage(key: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      try {
+        const cloud = window.Telegram?.WebApp?.CloudStorage;
+        if (!cloud) { resolve(null); return; }
+        cloud.getItem(key, (err: any, value: string) => {
+          if (err || !value) resolve(null);
+          else resolve(value);
+        });
+      } catch (e) {
+        resolve(null);
+      }
+    });
   }
 
-  return Math.max(0, totalMs / (1000 * 60 * 60));
-}
-
-export default function App() {
-  const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
-  
-  const [testRole, setTestRole] = useState<string | null>(null);
-  const activeRole = (user?.role === 'ADMIN' && testRole) ? testRole : (user?.role || 'GUEST');
-
-  const [currentTab, setCurrentTab] = useState<AppTab>('home');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
-
-  const [loginRole, setLoginRole] = useState<string>('operator');
-  const [loginPin, setLoginPin] = useState<string>('');
-  const [loginName, setLoginName] = useState<string>('');
-
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
-  const [delayCategoryFilter, setDelayCategoryFilter] = useState<string | null>(null);
-
-  const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
-  const [warehouseSearch, setWarehouseSearch] = useState<string>('');
-  const [warehouseCatFilter, setWarehouseCatFilter] = useState<string | null>(null);
-  const [showItemModal, setShowItemModal] = useState<boolean>(false);
-  const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
-  const [itemName, setItemName] = useState('');
-  const [itemCategory, setItemCategory] = useState('Тележечный цех');
-  const [itemQty, setItemQty] = useState('10');
-  const [itemUnit, setItemUnit] = useState('шт');
-  const [itemMinLimit, setItemMinLimit] = useState('5');
-
-  const [showStockAdjustModal, setShowStockAdjustModal] = useState<boolean>(false);
-  const [adjustingItem, setAdjustingItem] = useState<WarehouseItem | null>(null);
-  const [stockDelta, setStockDelta] = useState<string>('10');
-  const [adjustMode, setAdjustMode] = useState<'ADD' | 'SUBTRACT'>('ADD');
-
-  const [repairs, setRepairs] = useState<RepairCase[]>([]);
-  const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
-  const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
-  
-  const [shopMasters] = useState<Record<string, ShopMasterConfig>>({
-    procurement: { label: 'Отдел снабжения / Закупки', master: 'Не назначен', tg: '', role: 'SUPPLY', targetHours: 0 },
-    mechanic: { label: 'Начальник цехов', master: 'Не назначен', tg: '', role: 'MECHANIC', targetHours: 0 },
-    deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Не назначен', tg: '', role: 'DEPUTY', targetHours: 0 },
-    otk: { label: 'ОТК (Отдел технического контроля)', master: 'Не назначен', tg: '', role: 'OTK', targetHours: 1 },
-    bogie: { label: 'Тележечный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
-    wheels: { label: 'Колёсный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
-    brakes: { label: 'Автотормозной цех (АКП)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 2 },
-    body: { label: 'Вагоносборочный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 5 },
-    electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
-    prep: { label: 'Ремонтно-заготовительный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
-    mech_equip: { label: 'Цех механического оборудования', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
-    docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Не назначен', tg: '', role: 'CLERK', targetHours: 1 }
-  });
-
-  const [selectedCase, setSelectedCase] = useState<RepairCase | null>(null);
-  const [selectedMetrics, setSelectedMetrics] = useState<RepairTimeMetrics | null>(null);
-  const [statusHistory, setStatusHistory] = useState<any[]>([]);
-  const [documents, setDocuments] = useState<any[]>([]);
-  const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
-  const [docNumber, setDocNumber] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
-
-  const [showDelayModal, setShowDelayModal] = useState(false);
-  const [delayCategory, setDelayCategory] = useState('Materials');
-  const [delayType, setDelayType] = useState<'PRIMARY' | 'SECONDARY'>('PRIMARY');
-  const [delayCause, setDelayCause] = useState('');
-  const [responsibleParty, setResponsibleParty] = useState('');
-  const [nextAction, setNextAction] = useState('');
-  const [actionDeadline, setActionDeadline] = useState('');
-
-  const [arrivalCount, setArrivalCount] = useState<string>('1');
-  const [editingWagonNum, setEditingWagonNum] = useState<string>('');
-
-  const [track, setTrack] = useState('Путь 1');
-  const [position, setPosition] = useState('Позиция 1');
-
-  const selectedCaseRef = useRef<RepairCase | null>(null);
-
-  useEffect(() => {
-    selectedCaseRef.current = selectedCase;
-  }, [selectedCase]);
-
-  const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
-    try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
-  };
-
-  const getValidUserId = (u: any) => {
-    if (!u?.id) return null;
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    return uuidRegex.test(u.id) ? u.id : null;
-  };
-
-  const isCompletionStatus = (st: string) => {
-    if (!st) return false;
-    return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
-  };
-
-  const getKppAcceptedBy = (item: RepairCase) => {
-    if (!item.status_events || item.status_events.length === 0) return null;
-    const kppEvent = item.status_events.find((ev: any) => 
-      ev.comment?.includes('КПП') || ev.new_status === '04 QUEUE' || ev.new_status === CASE_STATUS.QUEUE
-    ) || item.status_events[item.status_events.length - 1];
-
-    if (kppEvent?.users?.name) return kppEvent.users.name;
-    if (kppEvent?.comment) {
-      const match = kppEvent.comment.match(/Ответственный:\s*([^)]+)/);
-      if (match) return match[1].trim();
-    }
-    return null;
-  };
-
-  useEffect(() => { 
-    initAuthAndData(); 
-  }, []);
-
-  useEffect(() => { 
-    if (!user?.id) return;
-
-    let t: ReturnType<typeof setTimeout> | null = null;
-    const scheduleRefresh = () => {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => loadData(), 150);
-    };
-
-    const realtimeChannel = supabase.channel('realtime-depo')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_items' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wagons' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'status_events' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, scheduleRefresh)
-      .subscribe();
-
-    return () => {
-      if (t) clearTimeout(t);
-      supabase.removeChannel(realtimeChannel);
-    };
-  }, [user?.id]);
-
-  async function initAuthAndData() {
-    let savedUserId = localStorage.getItem('depo_saved_user_id');
-
-    try {
-      const tg = window.Telegram?.WebApp;
-      if (tg) {
-        tg.ready();
-        tg.expand();
-        tg.setHeaderColor?.('bg_main');
-      }
-    } catch (e) {}
-
-    if (!savedUserId) {
-      const cloudId = await readCloudStorage('depo_saved_user_id');
-      if (cloudId) {
-        savedUserId = cloudId;
-        try { localStorage.setItem('depo_saved_user_id', cloudId); } catch (e) {}
-      }
-    }
-
-    if (savedUserId) {
-      const { data: savedDbUser } = await supabase.from('users').select('*').eq('id', savedUserId).maybeSingle();
-      if (savedDbUser) {
-        setUser(savedDbUser);
-        saveSession(savedDbUser.id);
-        loadData();
-        return;
-      } else {
-        clearSession();
-      }
-    }
-
-    let tgUser: any = null;
-    try {
-      const tg = window.Telegram?.WebApp;
-      if (tg?.initDataUnsafe?.user?.id) {
-        tgUser = tg.initDataUnsafe.user;
-      } else if (tg?.initData) {
-        const params = new URLSearchParams(tg.initData);
-        const userJson = params.get('user');
-        if (userJson) tgUser = JSON.parse(userJson);
-      }
-    } catch (e) {}
-
-    if (tgUser?.id) {
-      setIsOutsideTelegram(false);
-      const tgIdStr = String(tgUser.id);
-      const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
-
-      if (dbUser) {
-        saveSession(dbUser.id);
-        setUser(dbUser); 
-      } else {
-        setUser({ id: 'guest_temp', name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Гость', role: 'GUEST', telegram_id: tgIdStr });
-      }
-    } else {
-      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
-    }
-    loadData();
+  function saveSession(userId: string) {
+    try { localStorage.setItem('depo_saved_user_id', userId); } catch (e) {}
+    try { window.Telegram?.WebApp?.CloudStorage?.setItem('depo_saved_user_id', userId, () => {}); } catch (e) {}
   }
 
-  async function handlePinLogin() {
-    if (!loginName.trim() || !loginPin.trim()) {
-      alert('Введите ваше имя и PIN-код!');
-      return;
-    }
+  function clearSession() {
+    try { localStorage.removeItem('depo_saved_user_id'); } catch (e) {}
+    try { window.Telegram?.WebApp?.CloudStorage?.removeItem('depo_saved_user_id', () => {}); } catch (e) {}
+  }
 
-    setLoading(true); vibrate('medium');
+  export default function App() {
+    const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
+    
+    const [testRole, setTestRole] = useState<string | null>(null);
+    const activeRole = (user?.role === 'ADMIN' && testRole) ? testRole : (user?.role || 'GUEST');
 
-    const { data, error } = await supabase.rpc('login_with_pin', {
-      p_role: loginRole,
-      p_pin: loginPin.trim(),
-      p_name: loginName.trim()
+    const [currentTab, setCurrentTab] = useState<AppTab>('home');
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [allUsersList, setAllUsersList] = useState<UserRecord[]>([]);
+
+    const [loginRole, setLoginRole] = useState<string>('operator');
+    const [loginPin, setLoginPin] = useState<string>('');
+    const [loginName, setLoginName] = useState<string>('');
+
+    const [statusFilter, setStatusFilter] = useState<string | null>(null);
+    const [searchQuery, setSearchQuery] = useState<string>('');
+    const [repairTypeFilter, setRepairTypeFilter] = useState<string | null>(null);
+    const [delayCategoryFilter, setDelayCategoryFilter] = useState<string | null>(null);
+
+    const [warehouseItems, setWarehouseItems] = useState<WarehouseItem[]>([]);
+    const [warehouseSearch, setWarehouseSearch] = useState<string>('');
+    const [warehouseCatFilter, setWarehouseCatFilter] = useState<string | null>(null);
+    const [showItemModal, setShowItemModal] = useState<boolean>(false);
+    const [editingItem, setEditingItem] = useState<WarehouseItem | null>(null);
+    const [itemName, setItemName] = useState('');
+    const [itemCategory, setItemCategory] = useState('Тележечный цех');
+    const [itemQty, setItemQty] = useState('10');
+    const [itemUnit, setItemUnit] = useState('шт');
+    const [itemMinLimit, setItemMinLimit] = useState('5');
+
+    const [showStockAdjustModal, setShowStockAdjustModal] = useState<boolean>(false);
+    const [adjustingItem, setAdjustingItem] = useState<WarehouseItem | null>(null);
+    const [stockDelta, setStockDelta] = useState<string>('10');
+    const [adjustMode, setAdjustMode] = useState<'ADD' | 'SUBTRACT'>('ADD');
+
+    const [repairs, setRepairs] = useState<RepairCase[]>([]);
+    const [delayLogs, setDelayLogs] = useState<DelayLog[]>([]);
+    const [dqViolations, setDqViolations] = useState<DQViolation[]>([]);
+    
+    const [shopMasters] = useState<Record<string, ShopMasterConfig>>({
+      procurement: { label: 'Отдел снабжения / Закупки', master: 'Не назначен', tg: '', role: 'SUPPLY', targetHours: 0 },
+      mechanic: { label: 'Начальник цехов', master: 'Не назначен', tg: '', role: 'MECHANIC', targetHours: 0 },
+      deputy: { label: 'Зам. начальника ремонтного цеха', master: 'Не назначен', tg: '', role: 'DEPUTY', targetHours: 0 },
+      otk: { label: 'ОТК (Отдел технического контроля)', master: 'Не назначен', tg: '', role: 'OTK', targetHours: 1 },
+      bogie: { label: 'Тележечный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
+      wheels: { label: 'Колёсный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+      brakes: { label: 'Автотормозной цех (АКП)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 2 },
+      body: { label: 'Вагоносборочный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 5 },
+      electric: { label: 'Контрольный пункт автосцепки (КПА)', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+      prep: { label: 'Ремонтно-заготовительный цех', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 3 },
+      mech_equip: { label: 'Цех механического оборудования', master: 'Не назначен', tg: '', role: 'MASTER', targetHours: 4 },
+      docs: { label: 'Оформитель актов (ВУ-22 / ВУ-36М)', master: 'Не назначен', tg: '', role: 'CLERK', targetHours: 1 }
     });
 
-    if (error || !data) {
-      alert('❌ Неверный PIN-код для выбранного отдела!');
-    } else {
-      saveSession(data.id);
-      setUser(data);
-      setTestRole(null);
-      setLoginPin('');
-      setLoginName('');
+    const [selectedCase, setSelectedCase] = useState<RepairCase | null>(null);
+    const [selectedMetrics, setSelectedMetrics] = useState<RepairTimeMetrics | null>(null);
+    const [statusHistory, setStatusHistory] = useState<any[]>([]);
+    const [documents, setDocuments] = useState<any[]>([]);
+    const [docType, setDocType] = useState(DOCUMENT_TYPES[0]);
+    const [docNumber, setDocNumber] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [isOutsideTelegram, setIsOutsideTelegram] = useState(false);
+
+    const [showDelayModal, setShowDelayModal] = useState(false);
+    const [delayCategory, setDelayCategory] = useState('Materials');
+    const [delayType, setDelayType] = useState<'PRIMARY' | 'SECONDARY'>('PRIMARY');
+    const [delayCause, setDelayCause] = useState('');
+    const [responsibleParty, setResponsibleParty] = useState('');
+    const [nextAction, setNextAction] = useState('');
+    const [actionDeadline, setActionDeadline] = useState('');
+
+    const [arrivalCount, setArrivalCount] = useState<string>('1');
+    const [editingWagonNum, setEditingWagonNum] = useState<string>('');
+
+    const [track, setTrack] = useState('Путь 1');
+    const [position, setPosition] = useState('Позиция 1');
+
+    const selectedCaseRef = useRef<RepairCase | null>(null);
+
+    useEffect(() => {
+      selectedCaseRef.current = selectedCase;
+    }, [selectedCase]);
+
+    const vibrate = (style: 'light' | 'medium' | 'heavy' = 'light') => {
+      try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(style); } catch (e) {}
+    };
+
+    const getValidUserId = (u: any) => {
+      if (!u?.id) return null;
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      return uuidRegex.test(u.id) ? u.id : null;
+    };
+
+    const isCompletionStatus = (st: string) => {
+      if (!st) return false;
+      return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
+    };
+
+    const getKppAcceptedBy = (item: RepairCase) => {
+      if (!item.status_events || item.status_events.length === 0) return null;
+      const kppEvent = item.status_events.find((ev: any) => 
+        ev.comment?.includes('КПП') || ev.new_status === '04 QUEUE' || ev.new_status === CASE_STATUS.QUEUE
+      ) || item.status_events[item.status_events.length - 1];
+
+      if (kppEvent?.users?.name) return kppEvent.users.name;
+      if (kppEvent?.comment) {
+        const match = kppEvent.comment.match(/Ответственный:\s*([^)]+)/);
+        if (match) return match[1].trim();
+      }
+      return null;
+    };
+
+    useEffect(() => { 
+      initAuthAndData(); 
+    }, []);
+
+    useEffect(() => { 
+      if (!user?.id) return;
+
+      let t: ReturnType<typeof setTimeout> | null = null;
+      const scheduleRefresh = () => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => loadData(), 150);
+      };
+
+      const realtimeChannel = supabase.channel('realtime-depo')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'repair_cases' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'delay_log' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'warehouse_items' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'wagons' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'status_events' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, scheduleRefresh)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, scheduleRefresh)
+        .subscribe();
+
+      return () => {
+        if (t) clearTimeout(t);
+        supabase.removeChannel(realtimeChannel);
+      };
+    }, [user?.id]);
+
+    async function initAuthAndData() {
+      let savedUserId = localStorage.getItem('depo_saved_user_id');
+
+      try {
+        const tg = window.Telegram?.WebApp;
+        if (tg) {
+          tg.ready();
+          tg.expand();
+          tg.setHeaderColor?.('bg_main');
+        }
+      } catch (e) {}
+
+      if (!savedUserId) {
+        const cloudId = await readCloudStorage('depo_saved_user_id');
+        if (cloudId) {
+          savedUserId = cloudId;
+          try { localStorage.setItem('depo_saved_user_id', cloudId); } catch (e) {}
+        }
+      }
+
+      if (savedUserId) {
+        const { data: savedDbUser } = await supabase.from('users').select('*').eq('id', savedUserId).maybeSingle();
+        if (savedDbUser) {
+          setUser(savedDbUser);
+          saveSession(savedDbUser.id);
+          loadData();
+          return;
+        } else {
+          clearSession();
+        }
+      }
+
+      let tgUser: any = null;
+      try {
+        const tg = window.Telegram?.WebApp;
+        if (tg?.initDataUnsafe?.user?.id) {
+          tgUser = tg.initDataUnsafe.user;
+        } else if (tg?.initData) {
+          const params = new URLSearchParams(tg.initData);
+          const userJson = params.get('user');
+          if (userJson) tgUser = JSON.parse(userJson);
+        }
+      } catch (e) {}
+
+      if (tgUser?.id) {
+        setIsOutsideTelegram(false);
+        const tgIdStr = String(tgUser.id);
+        const { data: dbUser } = await supabase.from('users').select('*').eq('telegram_id', tgIdStr).maybeSingle();
+
+        if (dbUser) {
+          saveSession(dbUser.id);
+          setUser(dbUser); 
+        } else {
+          setUser({ id: 'guest_temp', name: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim() || 'Гость', role: 'GUEST', telegram_id: tgIdStr });
+        }
+      } else {
+        setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+      }
       loadData();
     }
-    setLoading(false);
-  }
 
-  function handleLogout() {
-    clearSession();
-    setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
-    setTestRole(null);
-  }
-
-  async function loadData() {
-    const activeCaseId = selectedCaseRef.current?.repair_id;
-
-    const [repairRes, delayRes, whRes, usersRes] = await Promise.all([
-      supabase.from('repair_cases').select(`
-        repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
-        track_number, position_number, shop_signatures, shop_progress, current_shop,
-        contracts ( customer_name, sla_hours ),
-        wagons ( id, wagon_number, owner, owner_type ),
-        status_events ( event_datetime, comment, new_status, users ( name ) )
-      `).order('created_at', { ascending: false }),
-      supabase.from('delay_log').select('*').order('start_datetime', { ascending: false }),
-      supabase.from('warehouse_items').select('*').order('name', { ascending: true }),
-      supabase.from('users').select('*').order('created_at', { ascending: false })
-    ]);
-
-    if (usersRes.data) setAllUsersList(usersRes.data as UserRecord[]);
-    if (whRes.data) setWarehouseItems(whRes.data as WarehouseItem[]);
-
-    if (repairRes.data) {
-      const fetchedRepairs = repairRes.data as unknown as RepairCase[];
-      setRepairs(fetchedRepairs);
-      setDelayLogs((delayRes.data as DelayLog[]) || []);
-      setDqViolations(runDataQualityChecks(fetchedRepairs, delayRes.data || []));
-
-      if (activeCaseId) {
-        const freshCase = fetchedRepairs.find(r => r.repair_id === activeCaseId);
-        if (freshCase) setSelectedCase(freshCase);
+    async function handlePinLogin() {
+      if (!loginName.trim() || !loginPin.trim()) {
+        alert('Введите ваше имя и PIN-код!');
+        return;
       }
+
+      setLoading(true); vibrate('medium');
+
+      const { data, error } = await supabase.rpc('login_with_pin', {
+        p_role: loginRole,
+        p_pin: loginPin.trim(),
+        p_name: loginName.trim()
+      });
+
+      if (error || !data) {
+        alert('❌ Неверный PIN-код для выбранного отдела!');
+      } else {
+        saveSession(data.id);
+        setUser(data);
+        setTestRole(null);
+        setLoginPin('');
+        setLoginName('');
+        loadData();
+      }
+      setLoading(false);
     }
 
-    if (activeCaseId) {
-      const [eventsRes, docsRes, timeRes] = await Promise.all([
-        supabase.from('status_events').select('*, users(name, role)').eq('repair_id', activeCaseId).order('event_datetime', { ascending: false }),
-        supabase.from('documents').select('*').eq('repair_id', activeCaseId).order('created_at', { ascending: false }),
-        supabase.from('v_repair_time_metrics').select('*').eq('repair_id', activeCaseId).maybeSingle()
+    function handleLogout() {
+      clearSession();
+      setUser({ id: 'guest_temp', name: 'Гость', role: 'GUEST' });
+      setTestRole(null);
+    }
+
+    async function loadData() {
+      const activeCaseId = selectedCaseRef.current?.repair_id;
+
+      const [repairRes, delayRes, whRes, usersRes] = await Promise.all([
+        supabase.from('repair_cases').select(`
+          repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
+          track_number, position_number, shop_signatures, shop_progress, current_shop,
+          contracts ( customer_name, sla_hours ),
+          wagons ( id, wagon_number, owner, owner_type ),
+          status_events ( event_datetime, comment, new_status, users ( name ) )
+        `).order('created_at', { ascending: false }),
+        supabase.from('delay_log').select('*').order('start_datetime', { ascending: false }),
+        supabase.from('warehouse_items').select('*').order('name', { ascending: true }),
+        supabase.from('users').select('*').order('created_at', { ascending: false })
       ]);
 
-      if (eventsRes.data) setStatusHistory(eventsRes.data);
-      if (docsRes.data) setDocuments(docsRes.data);
-      if (timeRes.data) {
-        const gross = Math.max(0, Number(timeRes.data.gross_repair_hours || 0));
-        const paused = Math.max(0, Number(timeRes.data.paused_hours || 0));
-        setSelectedMetrics({
-          total_dwell_hours: Number(Number(timeRes.data.total_dwell_hours || 0).toFixed(1)),
-          queue_hours: Number(Number(timeRes.data.queue_hours || 0).toFixed(1)),
-          gross_repair_hours: Number(gross.toFixed(1)),
-          paused_hours: Number(paused.toFixed(1)),
-          net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
-        } as RepairTimeMetrics);
+      if (usersRes.data) setAllUsersList(usersRes.data as UserRecord[]);
+      if (whRes.data) setWarehouseItems(whRes.data as WarehouseItem[]);
+
+      if (repairRes.data) {
+        const fetchedRepairs = repairRes.data as unknown as RepairCase[];
+        setRepairs(fetchedRepairs);
+        setDelayLogs((delayRes.data as DelayLog[]) || []);
+        setDqViolations(runDataQualityChecks(fetchedRepairs, delayRes.data || []));
+
+        if (activeCaseId) {
+          const freshCase = fetchedRepairs.find(r => r.repair_id === activeCaseId);
+          if (freshCase) setSelectedCase(freshCase);
+        }
+      }
+
+      if (activeCaseId) {
+        const [eventsRes, docsRes, timeRes] = await Promise.all([
+          supabase.from('status_events').select('*, users(name, role)').eq('repair_id', activeCaseId).order('event_datetime', { ascending: false }),
+          supabase.from('documents').select('*').eq('repair_id', activeCaseId).order('created_at', { ascending: false }),
+          supabase.from('v_repair_time_metrics').select('*').eq('repair_id', activeCaseId).maybeSingle()
+        ]);
+
+        if (eventsRes.data) setStatusHistory(eventsRes.data);
+        if (docsRes.data) setDocuments(docsRes.data);
+        if (timeRes.data) {
+          const gross = Math.max(0, Number(timeRes.data.gross_repair_hours || 0));
+          const paused = Math.max(0, Number(timeRes.data.paused_hours || 0));
+          setSelectedMetrics({
+            total_dwell_hours: Number(Number(timeRes.data.total_dwell_hours || 0).toFixed(1)),
+            queue_hours: Number(Number(timeRes.data.queue_hours || 0).toFixed(1)),
+            gross_repair_hours: Number(gross.toFixed(1)),
+            paused_hours: Number(paused.toFixed(1)),
+            net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
+          } as RepairTimeMetrics);
+        }
       }
     }
-  }
 
-  const goToWagons = (status: string | null) => {
-    vibrate('light');
-    setStatusFilter(status);
-    setCurrentTab('wagons');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  async function handleRoleChange(newRole: string) { 
-    if (user?.role === 'ADMIN') {
-      setTestRole(newRole); 
-      vibrate('medium'); 
-    }
-  }
-
-  const isGuest = activeRole === 'GUEST';
-  const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
-  
-  const canEditWagonNumber = isAdminOrOperator; 
-  const canEditRepairTypeAndOwner = !isGuest && (isAdminOrOperator || activeRole === 'docs');
-  const canUploadDocs = !isGuest && (isAdminOrOperator || activeRole === 'docs' || activeRole === 'otk');
-
-  const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
-  const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
-  const canReworkShop = (targetShopKey: string) => canPerformAction(targetShopKey) || activeRole === 'otk';
-  const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
-
-  const getAssignedMaster = (shopKey: string) => {
-    const assigned = allUsersList.find(u => u.role === shopKey);
-    if (assigned) {
-      return { master: assigned.name, tg: assigned.telegram_id ? `@id${assigned.telegram_id}` : '' };
-    }
-    const defaultInfo = shopMasters[shopKey];
-    return { master: defaultInfo?.master || 'Не назначен', tg: defaultInfo?.tg || '' };
-  };
-
-  const getMasterLabel = (shopKey: string) => {
-    const info = getAssignedMaster(shopKey);
-    return info.master;
-  };
-
-  const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
-
-  async function handleConfirmStockAdjust() {
-    if (isGuest || !adjustingItem || !stockDelta.trim()) return;
-    const amount = Number(stockDelta);
-    if (isNaN(amount) || amount <= 0) { alert('Введите корректное количество!'); return; }
-
-    setLoading(true); vibrate('heavy');
-    const finalDelta = adjustMode === 'ADD' ? amount : -amount;
-
-    const { error } = await supabase.rpc('add_warehouse_stock', {
-      p_id: adjustingItem.id,
-      p_delta: finalDelta,
-      p_user_id: getValidUserId(user)
-    });
-
-    if (!error) {
-      setShowStockAdjustModal(false); setAdjustingItem(null); loadData();
-    } else {
-      alert('Ошибка изменения остатков: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  const openStockAdjustModal = (item: WarehouseItem, mode: 'ADD' | 'SUBTRACT') => {
-    if (isGuest) return;
-    setAdjustingItem(item); setAdjustMode(mode); setStockDelta('10'); setShowStockAdjustModal(true);
-  };
-
-  async function handleSaveWarehouseItem() {
-    if (isGuest) return;
-    if (!itemName.trim()) { alert('Введите наименование позиции!'); return; }
-    setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('save_warehouse_item', {
-      p_id: editingItem ? editingItem.id : null,
-      p_name: itemName,
-      p_category: itemCategory,
-      p_quantity: Number(itemQty) || 0,
-      p_unit: itemUnit,
-      p_min_limit: Number(itemMinLimit) || 0,
-      p_user_id: getValidUserId(user)
-    });
-
-    if (!error) {
-      setShowItemModal(false); setEditingItem(null); setItemName(''); loadData();
-    } else {
-      alert('Ошибка сохранения склада: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  const openAddItemModal = (item?: WarehouseItem) => {
-    if (isGuest) return;
-    if (item) {
-      setEditingItem(item); setItemName(item.name); setItemCategory(item.category); setItemQty(String(item.quantity)); setItemUnit(item.unit); setItemMinLimit(String(item.min_limit));
-    } else {
-      setEditingItem(null); setItemName(''); setItemCategory('Тележечный цех'); setItemQty('10'); setItemUnit('шт'); setItemMinLimit('5');
-    }
-    setShowItemModal(true);
-  };
-
-  async function openCaseDetails(item: RepairCase) {
-    vibrate('light'); 
-    setSelectedCase(item);
-    setEditingWagonNum(item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '' : item.wagons?.wagon_number || '');
-
-    const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
-    if (timeMetrics) {
-      const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
-      const paused = Math.max(0, Number(timeMetrics.paused_hours || 0));
-      setSelectedMetrics({
-        total_dwell_hours: Number(Number(timeMetrics.total_dwell_hours || 0).toFixed(1)), queue_hours: Number(Number(timeMetrics.queue_hours || 0).toFixed(1)),
-        gross_repair_hours: Number(gross.toFixed(1)), paused_hours: Number(paused.toFixed(1)), net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
-      } as RepairTimeMetrics);
-    } else { setSelectedMetrics(null); }
-
-    const { data: events } = await supabase.from('status_events').select('*, users(name, role)').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
-    if (events) setStatusHistory(events);
-    
-    const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
-    setDocuments(docs || []);
-  }
-
-  async function handleKppArrival() {
-    if (isGuest) return;
-    const countNum = Number(arrivalCount);
-    if (isNaN(countNum) || countNum <= 0) { alert('Укажите корректное количество вагонов!'); return; }
-
-    setLoading(true); vibrate('medium');
-    const registrarName = user?.name || 'Охрана КПП';
-
-    const { error } = await supabase.rpc('register_kpp_arrival', {
-      p_count: countNum,
-      p_user_id: getValidUserId(user),
-      p_user_name: registrarName
-    });
-
-    if (!error) {
-      notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон', registrarName);
-      alert(`Успешно принято ${countNum} вагонов с КПП! (Ответственный: ${registrarName}). Оператор может внести их реальные номера.`);
-      setShowAddModal(false);
-      setArrivalCount('1');
-      loadData();
-    } else {
-      alert('Ошибка приёма вагонов с КПП: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  async function handleSaveWagonNumber() {
-    if (!selectedCase?.wagons?.id || !editingWagonNum.trim() || !canEditWagonNumber) return;
-    if (!/^\d{8}$/.test(editingWagonNum.trim())) {
-      alert('⚠️ Номер вагона должен состоять ровно из 8 ЦИФР!');
-      return;
-    }
-
-    setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('update_wagon_number', {
-      p_wagon_id: selectedCase.wagons.id,
-      p_new_number: editingWagonNum.trim(),
-      p_user_id: getValidUserId(user)
-    });
-
-    if (!error) {
-      alert('Номер вагона успешно обновлен!');
-      setSelectedCase(null);
-      loadData();
-    } else {
-      alert('Ошибка сохранения номера: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  async function handleDeleteCase() {
-    if (activeRole !== 'ADMIN' || !selectedCase) return;
-    const wagonNum = selectedCase.wagons?.wagon_number || '';
-    if (!window.confirm(`Вы уверены, что хотите полностью удалить вагон №${wagonNum} из базы данных? Это действие нельзя отменить.`)) {
-      return;
-    }
-
-    setLoading(true); vibrate('heavy');
-    const { error } = await supabase.rpc('delete_repair_case', {
-      p_repair_id: selectedCase.repair_id,
-      p_user_id: getValidUserId(user)
-    });
-
-    if (!error) {
-      alert(`Вагон успешно удален из базы.`);
-      setSelectedCase(null); loadData();
-    } else {
-      alert('Ошибка удаления вагона: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  // МАССОВАЯ ЗАГРУЗКА ФОТО АКТА ВУ-22
-  async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files ? Array.from(event.target.files) : [];
-    if (files.length === 0 || !selectedCase || !canUploadDocs) return;
-
-    setLoading(true); vibrate('medium');
-
-    try {
-      const uploadPromises = files.map(async (file, index) => {
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const fileName = `${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
-        const filePath = `vu22/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
-
-        const { error: rpcError } = await supabase.rpc('add_document', {
-          p_repair_id: selectedCase.repair_id,
-          p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
-          p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number || ''}`,
-          p_user_id: getValidUserId(user),
-          p_file_url: urlData.publicUrl
-        });
-        if (rpcError) throw rpcError;
-      });
-
-      await Promise.all(uploadPromises);
-      alert(`📷 Успешно загружено фото ВУ-22: ${files.length} шт.!`);
-      loadData();
-    } catch (uploadErr: any) {
-      alert('Ошибка при массовой загрузке фото: ' + uploadErr.message);
-    } finally {
-      setLoading(false);
-      event.target.value = '';
-    }
-  }
-
-  // МАССОВАЯ ЗАГРУЗКА ЛЮБЫХ ДРУГИХ ДОКУМЕНТОВ/ФОТО
-  async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = event.target.files ? Array.from(event.target.files) : [];
-    if (files.length === 0 || !selectedCase || !canUploadDocs) return;
-    
-    setLoading(true); vibrate('medium');
-    const finalDocNum = docNumber.trim() || `Б/Н`;
-
-    try {
-      const uploadPromises = files.map(async (file, index) => {
-        const fileExt = file.name.split('.').pop() || 'jpg';
-        const fileName = `doc_${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
-        const filePath = `vu22/${fileName}`; 
-
-        const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
-        if (uploadError) throw uploadError;
-
-        const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
-
-        const { error: rpcError } = await supabase.rpc('add_document', {
-          p_repair_id: selectedCase.repair_id,
-          p_doc_type: docType,
-          p_doc_number: finalDocNum,
-          p_user_id: getValidUserId(user),
-          p_file_url: urlData.publicUrl
-        });
-        if (rpcError) throw rpcError;
-      });
-
-      await Promise.all(uploadPromises);
-      alert(`📷 Успешно прикреплено файлов "${docType}": ${files.length} шт.!`);
-      setDocNumber('');
-      loadData();
-    } catch (uploadErr: any) {
-      alert('Ошибка при массовой загрузке: ' + uploadErr.message);
-    } finally {
-      setLoading(false);
-      event.target.value = '';
-    }
-  }
-
-  async function handleSignAct(shopKey: string, isNotRequired: boolean = false) {
-    if (!canPerformAction(shopKey) || !selectedCase) return;
-    setLoading(true); vibrate('medium');
-    const signLabel = isNotRequired ? 'Не требуется' : getMasterLabel(shopKey);
-    const { error } = await supabase.rpc('sign_defect_act', { 
-      p_repair_id: selectedCase.repair_id, 
-      p_shop_key: shopKey, 
-      p_user_name: signLabel, 
-      p_user_id: getValidUserId(user) 
-    });
-
-    if (!error) { 
-      if (!isNotRequired) {
-        notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
-      }
-      loadData(); 
-    } else {
-      alert('Ошибка подписи акта: ' + error.message);
-    }
-    setLoading(false);
-  }
-
-  async function handleUpdateShopStage(shopKey: string, status: string) {
-    const isRework = status === 'IN_PROGRESS';
-    const isAllowed = isRework ? canReworkShop(shopKey) : canPerformAction(shopKey);
-
-    if (!isAllowed || !selectedCase) return;
-    setLoading(true);
-    const masterLabel = status === 'NOT_REQUIRED' ? 'Не требуется' : getMasterLabel(shopKey);
-    const { error } = await supabase.rpc('update_shop_stage', { 
-      p_repair_id: selectedCase.repair_id, 
-      p_shop_key: shopKey, 
-      p_status: status, 
-      p_master_name: masterLabel, 
-      p_user_id: getValidUserId(user) 
-    });
-
-    if (!error) { 
-      if (status !== 'NOT_REQUIRED') {
-        notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); 
-      }
-      loadData(); 
-    }
-    setLoading(false);
-  }
-
-  async function handleAssignPosition(toRepair: boolean) {
-    if (!isAdminOrOperator || !selectedCase) return;
-    setLoading(true);
-    const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: getValidUserId(user) });
-    if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
-    else { alert('Ошибка завоза на путь: ' + error.message); }
-    setLoading(false);
-  }
-
-  async function handleAddDocumentTextOnly() {
-    if (!canUploadDocs || !docNumber.trim() || !selectedCase) return;
-    setLoading(true); vibrate('light');
-    const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: getValidUserId(user), p_file_url: null });
-    if (!error) { setDocNumber(''); loadData(); } 
-    else { alert('Ошибка: ' + error.message); }
-    setLoading(false);
-  }
-
-  async function handleUpdateStatus(newStatus: string) {
-    if (isGuest || !selectedCase) return;
-
-    if (newStatus !== CASE_STATUS.PAUSED && !allShopsCompleted) {
-      alert('⚠️ Перевод заблокирован! Все цеха должны завершить работу или поставить «Н/Т».');
-      return;
-    }
-
-    if (isCompletionStatus(newStatus) && !hasCompletionDocs) {
-      alert('⚠️ Действие заблокировано: Для перевода вагона прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М)!');
-      return;
-    }
-
-    if (newStatus === CASE_STATUS.PAUSED) { 
-      setDelayCategory('Materials');
-      const supplyInfo = getAssignedMaster('procurement');
-      setResponsibleParty(supplyInfo.master !== 'Не назначен' ? supplyInfo.master : 'Отдел снабжения');
-      setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
-    }
-    setLoading(true); vibrate('medium');
-    const { error } = await supabase.rpc('change_repair_status', { 
-      p_repair_id: selectedCase.repair_id, 
-      p_new_status: newStatus,
-      p_user_id: getValidUserId(user), 
-      p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` 
-    });
-    if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
-    else { alert('Ошибка: ' + error.message); }
-    setLoading(false);
-  }
-
-  async function handleConfirmDelay() {
-    if (isGuest) return;
-    if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
-    setLoading(true); vibrate('heavy');
-    const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: getValidUserId(user) });
-    if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); }
-    else { alert('Ошибка задержки: ' + error.message); }
-    setLoading(false);
-  }
-
-  function exportToCSV() {
-    const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'SLA Deadline', 'Forecast Release'];
-    const rows = filteredRepairs.map(r => [ escapeCsvCell(r.wagons?.wagon_number), escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), escapeCsvCell(r.repair_type), escapeCsvCell(r.wagons?.owner), escapeCsvCell(r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''), escapeCsvCell(r.forecast_release ? new Date(r.forecast_release).toLocaleString() : '') ]);
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const link = document.createElement('a'); link.setAttribute('href', encodeURI(csvContent)); link.setAttribute('download', `depo_wagons_${new Date().toISOString().split('T')[0]}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
-  }
-
-  const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
-  
-  const filteredRepairs = repairs.filter(r => {
-    if (statusFilter && r.current_status !== statusFilter) return false;
-    if (repairTypeFilter && r.repair_type !== repairTypeFilter) return false;
-    if (searchQuery.trim() && !r.wagons?.wagon_number?.includes(searchQuery.trim())) return false;
-    if (delayCategoryFilter) {
-      const activeDelay = delayLogs.find(d => d.repair_id === r.repair_id && !d.end_datetime);
-      if (!activeDelay || activeDelay.category !== delayCategoryFilter) return false;
-    }
-    return true;
-  });
-
-  const filteredWarehouseItems = warehouseItems.filter(item => {
-    if (warehouseCatFilter && item.category !== warehouseCatFilter) return false;
-    if (warehouseSearch.trim() && !item.name.toLowerCase().includes(warehouseSearch.trim().toLowerCase())) return false;
-    return true;
-  });
-
-  const resetAllFilters = () => { setStatusFilter(null); setSearchQuery(''); setRepairTypeFilter(null); setDelayCategoryFilter(null); };
-  const isFilterActive = statusFilter || searchQuery || repairTypeFilter || delayCategoryFilter;
-
-  const lostWagonDays = calculateLostWagonDays(delayLogs);
-  const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
-  const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
-  
-  const unassignedWagonsCount = repairs.filter(r => r.wagons?.wagon_number?.startsWith('БЕЗ_№_')).length;
-
-  const getWagonDwellHours = (r: RepairCase) => {
-    const start = new Date(r.created_at).getTime();
-    const end = r.current_status === CASE_STATUS.READY && r.forecast_release ? new Date(r.forecast_release).getTime() : new Date().getTime();
-    return Math.max(0, (end - start) / (1000 * 60 * 60));
-  };
-
-  const getRepairTypeStats = (typeCode: string) => {
-    const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
-    const hoursList = matchingRepairs.map(getWagonDwellHours);
-    if (hoursList.length === 0) return { count: 0, medianHours: 0, medianDays: 0, p90Hours: 0, p90Days: 0 };
-    const sorted = [...hoursList].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const medianH = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    const p90Idx = Math.floor(sorted.length * 0.9);
-    const p90H = sorted[p90Idx] || sorted[sorted.length - 1];
-    return { count: matchingRepairs.length, medianHours: Math.round(medianH), medianDays: Number((medianH / 24).toFixed(1)), p90Hours: Math.round(p90H), p90Days: Number((p90H / 24).toFixed(1)) };
-  };
-
-  const drStats = getRepairTypeStats('ДР');
-  const krpStats = getRepairTypeStats('КРП');
-  const trStats = getRepairTypeStats('ТР');
-
-  const activeRepairs = repairs.filter(r => r.current_status !== CASE_STATUS.READY);
-  const totalDwellHours = activeRepairs.reduce((acc, r) => acc + getWagonDwellHours(r), 0);
-  const totalDwellDays = (totalDwellHours / 24).toFixed(1);
-  const avgHoursPerWagon = activeRepairs.length > 0 ? Math.round(totalDwellHours / activeRepairs.length) : 0;
-  const avgDaysPerWagon = (avgHoursPerWagon / 24).toFixed(1);
-
-  const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
-  const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
-  
-  const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
-  
-  const actPhotoDocs = documents.filter(d => d.doc_type?.includes('ВУ-22') && d.file_url);
-  const hasActPhoto = actPhotoDocs.length > 0;
-
-  const allShopsCompleted = selectedCase?.shop_progress && DEFAULT_SHOPS.every(s => {
-    const prog = selectedCase.shop_progress[s.key];
-    return prog?.status === 'DONE' || prog?.status === 'NOT_REQUIRED';
-  });
-  
-  const hasCompletionDocs = documents.some(d => 
-    d.doc_type?.includes('ВУ-23') || 
-    d.doc_type?.includes('2612') || 
-    d.doc_type?.includes('36М') ||
-    d.doc_type?.includes('ВУ-36')
-  );
-
-  const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
-  const isReadyStatus = selectedCase?.current_status === CASE_STATUS.READY;
-  
-  const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
-  const isPauseAuthor = Boolean(lastPauseEvent && (lastPauseEvent.user_id === user?.id || (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)));
-  const activeDelay = delayLogs.find(d => d.repair_id === selectedCase?.repair_id && !d.end_datetime);
-  const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
-  const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
-
-  let visibleTransitions: string[] = [];
-  if (!isGuest && selectedCase) {
-    if (isPausedState) {
-      if (canResumeFromPause) visibleTransitions = availableTransitions;
-    } else if (isReadyStatus) {
-      if (isAdminOrOperator) {
-        visibleTransitions = Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]));
-      } else if (activeRole === 'otk') {
-        visibleTransitions = [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED];
-      }
-    } else {
-      if (canManageStatus) {
-        visibleTransitions = availableTransitions;
-      } else {
-        visibleTransitions = availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
-      }
-    }
-  }
-
-  // Расчет рабочих часов (08:00 - 17:00)
-  const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
-    if (!startAt) return { text: '', isOverdue: false };
-
-    const hoursSpent = getWorkingHoursSpent(startAt, endAt);
-
-    return { 
-      text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`, 
-      isOverdue: targetHours > 0 ? hoursSpent > targetHours : false 
+    const goToWagons = (status: string | null) => {
+      vibrate('light');
+      setStatusFilter(status);
+      setCurrentTab('wagons');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     };
-  };
 
-  if (isOutsideTelegram) {
-    return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
-  }
+    async function handleRoleChange(newRole: string) { 
+      if (user?.role === 'ADMIN') {
+        setTestRole(newRole); 
+        vibrate('medium'); 
+      }
+    }
 
-  if (isGuest) {
-    return (
-      <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
-        <div className="premium-card" style={{ maxWidth: '380px', width: '100%', textAlign: 'center', padding: '24px' }}>
-          <h2 style={{ color: 'var(--brand)', margin: '0 0 6px 0', fontSize: '24px', fontWeight: '900' }}>🚂 ДЕПО TMS</h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '20px' }}>
-            Авторизация в системе управления депо
-          </p>
+    const isGuest = activeRole === 'GUEST';
+    const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
+    
+    const canEditWagonNumber = isAdminOrOperator; 
+    const canEditRepairTypeAndOwner = !isGuest && (isAdminOrOperator || activeRole === 'docs');
+    const canUploadDocs = !isGuest && (isAdminOrOperator || activeRole === 'docs' || activeRole === 'otk');
 
-          <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                Отдел / Должность:
-              </label>
-              <select
-                className="select-field"
-                style={{ margin: 0, fontSize: '13px', fontWeight: 'bold' }}
-                value={loginRole}
-                onChange={e => setLoginRole(e.target.value)}
+    const canManageStatus = !isGuest && (isAdminOrOperator || activeRole === 'otk');
+    const canPerformAction = (targetShopKey: string) => !isGuest && (activeRole === 'ADMIN' || activeRole === targetShopKey);
+    const canReworkShop = (targetShopKey: string) => canPerformAction(targetShopKey) || activeRole === 'otk';
+    const canManageWarehouse = !isGuest && (activeRole === 'ADMIN' || activeRole === 'procurement');
+
+    const getAssignedMaster = (shopKey: string) => {
+      const assigned = allUsersList.find(u => u.role === shopKey);
+      if (assigned) {
+        return { master: assigned.name, tg: assigned.telegram_id ? `@id${assigned.telegram_id}` : '' };
+      }
+      const defaultInfo = shopMasters[shopKey];
+      return { master: defaultInfo?.master || 'Не назначен', tg: defaultInfo?.tg || '' };
+    };
+
+    const getMasterLabel = (shopKey: string) => {
+      const info = getAssignedMaster(shopKey);
+      return info.master;
+    };
+
+    const escapeCsvCell = (str: any) => str == null ? '""' : `"${String(str).replace(/"/g, '""')}"`;
+
+    async function handleConfirmStockAdjust() {
+      if (isGuest || !adjustingItem || !stockDelta.trim()) return;
+      const amount = Number(stockDelta);
+      if (isNaN(amount) || amount <= 0) { alert('Введите корректное количество!'); return; }
+
+      setLoading(true); vibrate('heavy');
+      const finalDelta = adjustMode === 'ADD' ? amount : -amount;
+
+      const { error } = await supabase.rpc('add_warehouse_stock', {
+        p_id: adjustingItem.id,
+        p_delta: finalDelta,
+        p_user_id: getValidUserId(user)
+      });
+
+      if (!error) {
+        setShowStockAdjustModal(false); setAdjustingItem(null); loadData();
+      } else {
+        alert('Ошибка изменения остатков: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    const openStockAdjustModal = (item: WarehouseItem, mode: 'ADD' | 'SUBTRACT') => {
+      if (isGuest) return;
+      setAdjustingItem(item); setAdjustMode(mode); setStockDelta('10'); setShowStockAdjustModal(true);
+    };
+
+    async function handleSaveWarehouseItem() {
+      if (isGuest) return;
+      if (!itemName.trim()) { alert('Введите наименование позиции!'); return; }
+      setLoading(true); vibrate('medium');
+      const { error } = await supabase.rpc('save_warehouse_item', {
+        p_id: editingItem ? editingItem.id : null,
+        p_name: itemName,
+        p_category: itemCategory,
+        p_quantity: Number(itemQty) || 0,
+        p_unit: itemUnit,
+        p_min_limit: Number(itemMinLimit) || 0,
+        p_user_id: getValidUserId(user)
+      });
+
+      if (!error) {
+        setShowItemModal(false); setEditingItem(null); setItemName(''); loadData();
+      } else {
+        alert('Ошибка сохранения склада: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    const openAddItemModal = (item?: WarehouseItem) => {
+      if (isGuest) return;
+      if (item) {
+        setEditingItem(item); setItemName(item.name); setItemCategory(item.category); setItemQty(String(item.quantity)); setItemUnit(item.unit); setItemMinLimit(String(item.min_limit));
+      } else {
+        setEditingItem(null); setItemName(''); setItemCategory('Тележечный цех'); setItemQty('10'); setItemUnit('шт'); setItemMinLimit('5');
+      }
+      setShowItemModal(true);
+    };
+
+    async function openCaseDetails(item: RepairCase) {
+      vibrate('light'); 
+      setSelectedCase(item);
+      setEditingWagonNum(item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '' : item.wagons?.wagon_number || '');
+
+      const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
+      if (timeMetrics) {
+        const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
+        const paused = Math.max(0, Number(timeMetrics.paused_hours || 0));
+        setSelectedMetrics({
+          total_dwell_hours: Number(Number(timeMetrics.total_dwell_hours || 0).toFixed(1)), queue_hours: Number(Number(timeMetrics.queue_hours || 0).toFixed(1)),
+          gross_repair_hours: Number(gross.toFixed(1)), paused_hours: Number(paused.toFixed(1)), net_repair_hours: Number(Math.max(0, gross - paused).toFixed(1))
+        } as RepairTimeMetrics);
+      } else { setSelectedMetrics(null); }
+
+      const { data: events } = await supabase.from('status_events').select('*, users(name, role)').eq('repair_id', item.repair_id).order('event_datetime', { ascending: false });
+      if (events) setStatusHistory(events);
+      
+      const { data: docs } = await supabase.from('documents').select('*').eq('repair_id', item.repair_id).order('created_at', { ascending: false });
+      setDocuments(docs || []);
+    }
+
+    async function handleKppArrival() {
+      if (isGuest) return;
+      const countNum = Number(arrivalCount);
+      if (isNaN(countNum) || countNum <= 0) { alert('Укажите корректное количество вагонов!'); return; }
+
+      setLoading(true); vibrate('medium');
+      const registrarName = user?.name || 'Охрана КПП';
+
+      const { error } = await supabase.rpc('register_kpp_arrival', {
+        p_count: countNum,
+        p_user_id: getValidUserId(user),
+        p_user_name: registrarName
+      });
+
+      if (!error) {
+        notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон', registrarName);
+        alert(`Успешно принято ${countNum} вагонов с КПП! (Ответственный: ${registrarName}). Оператор может внести их реальные номера.`);
+        setShowAddModal(false);
+        setArrivalCount('1');
+        loadData();
+      } else {
+        alert('Ошибка приёма вагонов с КПП: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    async function handleSaveWagonNumber() {
+      if (!selectedCase?.wagons?.id || !editingWagonNum.trim() || !canEditWagonNumber) return;
+      if (!/^\d{8}$/.test(editingWagonNum.trim())) {
+        alert('⚠️ Номер вагона должен состоять ровно из 8 ЦИФР!');
+        return;
+      }
+
+      setLoading(true); vibrate('medium');
+      const { error } = await supabase.rpc('update_wagon_number', {
+        p_wagon_id: selectedCase.wagons.id,
+        p_new_number: editingWagonNum.trim(),
+        p_user_id: getValidUserId(user)
+      });
+
+      if (!error) {
+        alert('Номер вагона успешно обновлен!');
+        setSelectedCase(null);
+        loadData();
+      } else {
+        alert('Ошибка сохранения номера: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    async function handleDeleteCase() {
+      if (activeRole !== 'ADMIN' || !selectedCase) return;
+      const wagonNum = selectedCase.wagons?.wagon_number || '';
+      if (!window.confirm(`Вы уверены, что хотите полностью удалить вагон №${wagonNum} из базы данных? Это действие нельзя отменить.`)) {
+        return;
+      }
+
+      setLoading(true); vibrate('heavy');
+      const { error } = await supabase.rpc('delete_repair_case', {
+        p_repair_id: selectedCase.repair_id,
+        p_user_id: getValidUserId(user)
+      });
+
+      if (!error) {
+        alert(`Вагон успешно удален из базы.`);
+        setSelectedCase(null); loadData();
+      } else {
+        alert('Ошибка удаления вагона: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    // МАССОВАЯ ЗАГРУЗКА ФОТО АКТА ВУ-22 (С поддержкой 5-10+ фото)
+    async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      if (files.length === 0 || !selectedCase || !canUploadDocs) return;
+
+      setLoading(true); vibrate('medium');
+
+      try {
+        const uploadPromises = files.map(async (file, index) => {
+          const fileExt = file.name.split('.').pop() || 'jpg';
+          const fileName = `${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
+          const filePath = `vu22/${fileName}`;
+
+          const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+          if (uploadError) throw uploadError;
+
+          const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
+
+          const { error: rpcError } = await supabase.rpc('add_document', {
+            p_repair_id: selectedCase.repair_id,
+            p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
+            p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number || ''}`,
+            p_user_id: getValidUserId(user),
+            p_file_url: urlData.publicUrl
+          });
+          if (rpcError) throw rpcError;
+        });
+
+        await Promise.all(uploadPromises);
+        alert(`📷 Успешно загружено фото ВУ-22: ${files.length} шт.!`);
+        loadData();
+      } catch (uploadErr: any) {
+        alert('Ошибка при массовой загрузке фото: ' + uploadErr.message);
+      } finally {
+        setLoading(false);
+        event.target.value = '';
+      }
+    }
+
+    // МАССОВАЯ ЗАГРУЗКА ЛЮБЫХ ДРУГИХ ДОКУМЕНТОВ/ФОТО
+    async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
+      const files = event.target.files ? Array.from(event.target.files) : [];
+      if (files.length === 0 || !selectedCase || !canUploadDocs) return;
+      
+      setLoading(true); vibrate('medium');
+      const finalDocNum = docNumber.trim() || `Б/Н`;
+
+      try {
+        const uploadPromises = files.map(async (file, index) => {
+          const fileExt = file.name.split('.').pop() || 'jpg';
+          const fileName = `doc_${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
+          const filePath = `vu22/${fileName}`; 
+
+          const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+          if (uploadError) throw uploadError;
+
+          const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
+
+          const { error: rpcError } = await supabase.rpc('add_document', {
+            p_repair_id: selectedCase.repair_id,
+            p_doc_type: docType,
+            p_doc_number: finalDocNum,
+            p_user_id: getValidUserId(user),
+            p_file_url: urlData.publicUrl
+          });
+          if (rpcError) throw rpcError;
+        });
+
+        await Promise.all(uploadPromises);
+        alert(`📷 Успешно прикреплено файлов "${docType}": ${files.length} шт.!`);
+        setDocNumber('');
+        loadData();
+      } catch (uploadErr: any) {
+        alert('Ошибка при массовой загрузке: ' + uploadErr.message);
+      } finally {
+        setLoading(false);
+        event.target.value = '';
+      }
+    }
+
+    async function handleSignAct(shopKey: string, isNotRequired: boolean = false) {
+      if (!canPerformAction(shopKey) || !selectedCase) return;
+      setLoading(true); vibrate('medium');
+      const signLabel = isNotRequired ? 'Не требуется' : getMasterLabel(shopKey);
+      const { error } = await supabase.rpc('sign_defect_act', { 
+        p_repair_id: selectedCase.repair_id, 
+        p_shop_key: shopKey, 
+        p_user_name: signLabel, 
+        p_user_id: getValidUserId(user) 
+      });
+
+      if (!error) { 
+        if (!isNotRequired) {
+          notifyActSigned(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', signLabel); 
+        }
+        loadData(); 
+      } else {
+        alert('Ошибка подписи акта: ' + error.message);
+      }
+      setLoading(false);
+    }
+
+    async function handleUpdateShopStage(shopKey: string, status: string) {
+      const isRework = status === 'IN_PROGRESS';
+      const isAllowed = isRework ? canReworkShop(shopKey) : canPerformAction(shopKey);
+
+      if (!isAllowed || !selectedCase) return;
+      setLoading(true);
+      const masterLabel = status === 'NOT_REQUIRED' ? 'Не требуется' : getMasterLabel(shopKey);
+      const { error } = await supabase.rpc('update_shop_stage', { 
+        p_repair_id: selectedCase.repair_id, 
+        p_shop_key: shopKey, 
+        p_status: status, 
+        p_master_name: masterLabel, 
+        p_user_id: getValidUserId(user) 
+      });
+
+      if (!error) { 
+        if (status !== 'NOT_REQUIRED') {
+          notifyShopStageUpdated(selectedCase.wagons?.wagon_number, shopMasters[shopKey]?.label || 'Цех', status, masterLabel); 
+        }
+        loadData(); 
+      }
+      setLoading(false);
+    }
+
+    async function handleAssignPosition(toRepair: boolean) {
+      if (!isAdminOrOperator || !selectedCase) return;
+      setLoading(true);
+      const { error } = await supabase.rpc('assign_repair_position', { p_repair_id: selectedCase.repair_id, p_track: toRepair ? track : null, p_position: toRepair ? position : null, p_user_id: getValidUserId(user) });
+      if (!error) { notifyPositionAssigned(selectedCase.wagons?.wagon_number, toRepair, track, position); setSelectedCase(null); loadData(); }
+      else { alert('Ошибка завоза на путь: ' + error.message); }
+      setLoading(false);
+    }
+
+    async function handleAddDocumentTextOnly() {
+      if (!canUploadDocs || !docNumber.trim() || !selectedCase) return;
+      setLoading(true); vibrate('light');
+      const { error } = await supabase.rpc('add_document', { p_repair_id: selectedCase.repair_id, p_doc_type: docType, p_doc_number: docNumber, p_user_id: getValidUserId(user), p_file_url: null });
+      if (!error) { setDocNumber(''); loadData(); } 
+      else { alert('Ошибка: ' + error.message); }
+      setLoading(false);
+    }
+
+    async function handleUpdateStatus(newStatus: string) {
+      if (isGuest || !selectedCase) return;
+
+      if (newStatus !== CASE_STATUS.PAUSED && !allShopsCompleted) {
+        alert('⚠️ Перевод заблокирован! Все цеха должны завершить работу или поставить «Н/Т».');
+        return;
+      }
+
+      if (isCompletionStatus(newStatus) && !hasCompletionDocs) {
+        alert('⚠️ Действие заблокировано: Для перевода вагона прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М)!');
+        return;
+      }
+
+      if (newStatus === CASE_STATUS.PAUSED) { 
+        setDelayCategory('Materials');
+        const supplyInfo = getAssignedMaster('procurement');
+        setResponsibleParty(supplyInfo.master !== 'Не назначен' ? supplyInfo.master : 'Отдел снабжения');
+        setDelayCause(''); setNextAction(''); setActionDeadline(''); setShowDelayModal(true); return; 
+      }
+      setLoading(true); vibrate('medium');
+      const { error } = await supabase.rpc('change_repair_status', { 
+        p_repair_id: selectedCase.repair_id, 
+        p_new_status: newStatus,
+        p_user_id: getValidUserId(user), 
+        p_comment: `Переход на ${STATUS_RU[newStatus] || newStatus}` 
+      });
+      if (!error) { notifyStatusChanged(selectedCase.wagons?.wagon_number, STATUS_RU[newStatus] || newStatus); setSelectedCase(null); loadData(); } 
+      else { alert('Ошибка: ' + error.message); }
+      setLoading(false);
+    }
+
+    async function handleConfirmDelay() {
+      if (isGuest) return;
+      if (!delayCause.trim() || !nextAction.trim() || !responsibleParty.trim()) { alert('Заполните все поля!'); return; }
+      setLoading(true); vibrate('heavy');
+      const { error } = await supabase.rpc('register_delay', { p_repair_id: selectedCase?.repair_id, p_category: delayCategory, p_delay_type: delayType, p_cause: delayCause, p_responsible_party: responsibleParty, p_next_action: nextAction, p_action_deadline: actionDeadline ? new Date(actionDeadline).toISOString() : null, p_user_id: getValidUserId(user) });
+      if (!error) { notifyDelayRegistered(selectedCase?.wagons?.wagon_number || '', delayCategory, delayCause, responsibleParty, nextAction); setShowDelayModal(false); setSelectedCase(null); setActionDeadline(''); loadData(); }
+      else { alert('Ошибка задержки: ' + error.message); }
+      setLoading(false);
+    }
+
+    function exportToCSV() {
+      const headers = ['Wagon Number', 'Status', 'Repair Type', 'Owner', 'SLA Deadline', 'Forecast Release'];
+      const rows = filteredRepairs.map(r => [ escapeCsvCell(r.wagons?.wagon_number), escapeCsvCell(STATUS_RU[r.current_status] || r.current_status), escapeCsvCell(r.repair_type), escapeCsvCell(r.wagons?.owner), escapeCsvCell(r.sla_deadline ? new Date(r.sla_deadline).toLocaleString() : ''), escapeCsvCell(r.forecast_release ? new Date(r.forecast_release).toLocaleString() : '') ]);
+      const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const link = document.createElement('a'); link.setAttribute('href', encodeURI(csvContent)); link.setAttribute('download', `depo_wagons_${new Date().toISOString().split('T')[0]}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    const onSiteRepairs = repairs.filter(r => ON_SITE_STATUSES.includes(r.current_status));
+    
+    const filteredRepairs = repairs.filter(r => {
+      if (statusFilter && r.current_status !== statusFilter) return false;
+      if (repairTypeFilter && r.repair_type !== repairTypeFilter) return false;
+      if (searchQuery.trim() && !r.wagons?.wagon_number?.includes(searchQuery.trim())) return false;
+      if (delayCategoryFilter) {
+        const activeDelay = delayLogs.find(d => d.repair_id === r.repair_id && !d.end_datetime);
+        if (!activeDelay || activeDelay.category !== delayCategoryFilter) return false;
+      }
+      return true;
+    });
+
+    const filteredWarehouseItems = warehouseItems.filter(item => {
+      if (warehouseCatFilter && item.category !== warehouseCatFilter) return false;
+      if (warehouseSearch.trim() && !item.name.toLowerCase().includes(warehouseSearch.trim().toLowerCase())) return false;
+      return true;
+    });
+
+    const resetAllFilters = () => { setStatusFilter(null); setSearchQuery(''); setRepairTypeFilter(null); setDelayCategoryFilter(null); };
+    const isFilterActive = statusFilter || searchQuery || repairTypeFilter || delayCategoryFilter;
+
+    const lostWagonDays = calculateLostWagonDays(delayLogs);
+    const readyNotDispatched = repairs.filter(r => r.current_status === CASE_STATUS.READY);
+    const forecastBreaches = repairs.filter(r => r.forecast_release && r.sla_deadline && new Date(r.forecast_release) > new Date(r.sla_deadline));
+    
+    const unassignedWagonsCount = repairs.filter(r => r.wagons?.wagon_number?.startsWith('БЕЗ_№_')).length;
+
+    const getWagonDwellHours = (r: RepairCase) => {
+      const start = new Date(r.created_at).getTime();
+      const end = r.current_status === CASE_STATUS.READY && r.forecast_release ? new Date(r.forecast_release).getTime() : new Date().getTime();
+      return Math.max(0, (end - start) / (1000 * 60 * 60));
+    };
+
+    const getRepairTypeStats = (typeCode: string) => {
+      const matchingRepairs = repairs.filter(r => r.repair_type === typeCode);
+      const hoursList = matchingRepairs.map(getWagonDwellHours);
+      if (hoursList.length === 0) return { count: 0, medianHours: 0, medianDays: 0, p90Hours: 0, p90Days: 0 };
+      const sorted = [...hoursList].sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      const medianH = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      const p90Idx = Math.floor(sorted.length * 0.9);
+      const p90H = sorted[p90Idx] || sorted[sorted.length - 1];
+      return { count: matchingRepairs.length, medianHours: Math.round(medianH), medianDays: Number((medianH / 24).toFixed(1)), p90Hours: Math.round(p90H), p90Days: Number((p90H / 24).toFixed(1)) };
+    };
+
+    const drStats = getRepairTypeStats('ДР');
+    const krpStats = getRepairTypeStats('КРП');
+    const trStats = getRepairTypeStats('ТР');
+
+    const activeRepairs = repairs.filter(r => r.current_status !== CASE_STATUS.READY);
+    const totalDwellHours = activeRepairs.reduce((acc, r) => acc + getWagonDwellHours(r), 0);
+    const totalDwellDays = (totalDwellHours / 24).toFixed(1);
+    const avgHoursPerWagon = activeRepairs.length > 0 ? Math.round(totalDwellHours / activeRepairs.length) : 0;
+    const avgDaysPerWagon = (avgHoursPerWagon / 24).toFixed(1);
+
+    const availableTransitions = selectedCase ? (ALLOWED_TRANSITIONS[selectedCase.current_status as keyof typeof ALLOWED_TRANSITIONS] || []) : [];
+    const isInitialPhase = selectedCase && [CASE_STATUS.PLANNED, CASE_STATUS.QUEUE].includes(selectedCase.current_status as any);
+    
+    const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
+    
+    const actPhotoDocs = documents.filter(d => d.doc_type?.includes('ВУ-22') && d.file_url);
+    const hasActPhoto = actPhotoDocs.length > 0;
+
+    const allShopsCompleted = selectedCase?.shop_progress && DEFAULT_SHOPS.every(s => {
+      const prog = selectedCase.shop_progress[s.key];
+      return prog?.status === 'DONE' || prog?.status === 'NOT_REQUIRED';
+    });
+    
+    const hasCompletionDocs = documents.some(d => 
+      d.doc_type?.includes('ВУ-23') || 
+      d.doc_type?.includes('2612') || 
+      d.doc_type?.includes('36М') ||
+      d.doc_type?.includes('ВУ-36')
+    );
+
+    const isPausedState = selectedCase?.current_status === CASE_STATUS.PAUSED;
+    const isReadyStatus = selectedCase?.current_status === CASE_STATUS.READY;
+    
+    const lastPauseEvent = statusHistory.find(ev => ev.new_status === CASE_STATUS.PAUSED || ev.new_status === '08 REPAIR_PAUSED');
+    const isPauseAuthor = Boolean(lastPauseEvent && (lastPauseEvent.user_id === user?.id || (lastPauseEvent.users?.role && lastPauseEvent.users.role === activeRole)));
+    const activeDelay = delayLogs.find(d => d.repair_id === selectedCase?.repair_id && !d.end_datetime);
+    const isDelayResponsible = Boolean(activeDelay && ((activeDelay.category === 'Materials' && activeRole === 'procurement') || (activeDelay.category === 'Equipment' && activeRole === 'mechanic') || (activeDelay.responsible_party && activeDelay.responsible_party.includes(user?.name || ''))));
+    const canResumeFromPause = activeRole === 'ADMIN' || activeRole === 'otk' || activeRole === 'operator' || isPauseAuthor || isDelayResponsible;
+
+    let visibleTransitions: string[] = [];
+    if (!isGuest && selectedCase) {
+      if (isPausedState) {
+        if (canResumeFromPause) visibleTransitions = availableTransitions;
+      } else if (isReadyStatus) {
+        if (isAdminOrOperator) {
+          visibleTransitions = Array.from(new Set([...availableTransitions, CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED]));
+        } else if (activeRole === 'otk') {
+          visibleTransitions = [CASE_STATUS.IN_REPAIR, CASE_STATUS.PAUSED];
+        }
+      } else {
+        if (canManageStatus) {
+          visibleTransitions = availableTransitions;
+        } else {
+          visibleTransitions = availableTransitions.filter((st: string) => st === CASE_STATUS.PAUSED);
+        }
+      }
+    }
+
+    const renderShopTimeInfo = (startAt: string | null, endAt: string | null, targetHours: number) => {
+      const startTime = startAt ? new Date(startAt).getTime() : null;
+      const endTime = endAt ? new Date(endAt).getTime() : new Date().getTime();
+      if (!startTime) return { text: '', isOverdue: false };
+      const hoursSpent = Math.max(0, (endTime - startTime) / (1000 * 60 * 60));
+      return { 
+        text: hoursSpent < 1 ? `${Math.round(hoursSpent * 60)} мин` : `${hoursSpent.toFixed(1)} ч`, 
+        isOverdue: targetHours > 0 ? hoursSpent > targetHours : false 
+      };
+    };
+
+    if (isOutsideTelegram) {
+      return <div style={{ display: 'flex', height: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', textAlign: 'center', padding: '20px' }}><div><h2 style={{ color: 'var(--status-paused)', marginBottom: '10px' }}>⛔ Доступ запрещен</h2><p style={{ color: 'var(--text-secondary)' }}>Пожалуйста, откройте это приложение внутри Telegram.</p></div></div>;
+    }
+
+    if (isGuest) {
+      return (
+        <div style={{ display: 'flex', minHeight: '100vh', justifyContent: 'center', alignItems: 'center', background: 'var(--bg-main)', padding: '20px' }}>
+          <div className="premium-card" style={{ maxWidth: '380px', width: '100%', textAlign: 'center', padding: '24px' }}>
+            <h2 style={{ color: 'var(--brand)', margin: '0 0 6px 0', fontSize: '24px', fontWeight: '900' }}>🚂 ДЕПО TMS</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '12px', marginBottom: '20px' }}>
+              Авторизация в системе управления депо
+            </p>
+
+            <div style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Отдел / Должность:
+                </label>
+                <select
+                  className="select-field"
+                  style={{ margin: 0, fontSize: '13px', fontWeight: 'bold' }}
+                  value={loginRole}
+                  onChange={e => setLoginRole(e.target.value)}
+                >
+                  {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => (
+                    <option key={r.key} value={r.key}>{r.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Ваше имя и фамилия:
+                </label>
+                <input
+                  className="input-field"
+                  style={{ margin: 0, fontSize: '13px' }}
+                  type="text"
+                  placeholder="Иван Иванов"
+                  value={loginName}
+                  onChange={e => setLoginName(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  PIN-код доступа:
+                </label>
+                <input
+                  className="input-field"
+                  style={{ margin: 0, fontSize: '20px', textAlign: 'center', letterSpacing: '6px', fontWeight: 'bold' }}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="****"
+                  value={loginPin}
+                  onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
+                  onKeyDown={e => { if (e.key === 'Enter') handlePinLogin(); }}
+                />
+              </div>
+
+              <button 
+                className="btn-primary" 
+                style={{ width: '100%', padding: '12px', fontSize: '14px', marginTop: '8px' }} 
+                onClick={handlePinLogin} 
+                disabled={loading}
               >
-                {ROLES_LIST.filter(r => r.key !== 'GUEST').map(r => (
-                  <option key={r.key} value={r.key}>{r.label}</option>
-                ))}
-              </select>
+                {loading ? 'Проверка...' : '🔑 Войти в систему'}
+              </button>
             </div>
-
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                Ваше имя и фамилия:
-              </label>
-              <input
-                className="input-field"
-                style={{ margin: 0, fontSize: '13px' }}
-                type="text"
-                placeholder="Иван Иванов"
-                value={loginName}
-                onChange={e => setLoginName(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                PIN-код доступа:
-              </label>
-              <input
-                className="input-field"
-                style={{ margin: 0, fontSize: '20px', textAlign: 'center', letterSpacing: '6px', fontWeight: 'bold' }}
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                placeholder="****"
-                value={loginPin}
-                onChange={e => setLoginPin(e.target.value.replace(/\D/g, ''))}
-                onKeyDown={e => { if (e.key === 'Enter') handlePinLogin(); }}
-              />
-            </div>
-
-            <button 
-              className="btn-primary" 
-              style={{ width: '100%', padding: '12px', fontSize: '14px', marginTop: '8px' }} 
-              onClick={handlePinLogin} 
-              disabled={loading}
-            >
-              {loading ? 'Проверка...' : '🔑 Войти в систему'}
-            </button>
           </div>
         </div>
-      </div>
-    );
-  }
+      );
+    }
 
-  return (
-    <div>
-      <header className="brand-header">
-        <h1 className="brand-title">ДЕПО TMS</h1>
-        <span className="status-pill">{user?.name || 'Пользователь'}</span>
-      </header>
+    return (
+      <div>
+        <header className="brand-header">
+          <h1 className="brand-title">ДЕПО TMS</h1>
+          <span className="status-pill">{user?.name || 'Пользователь'}</span>
+        </header>
 
-      <div className="content-area">
-        {unassignedWagonsCount > 0 && isAdminOrOperator && (
-          <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }} onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <div style={{ fontWeight: '800', fontSize: '13px', color: 'var(--status-queue)' }}>
-                  ⚠️ Неоформленные вагоны с КПП: {unassignedWagonsCount} шт.
+        <div className="content-area">
+          {unassignedWagonsCount > 0 && isAdminOrOperator && (
+            <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }} onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: '800', fontSize: '13px', color: 'var(--status-queue)' }}>
+                    ⚠️ Неоформленные вагоны с КПП: {unassignedWagonsCount} шт.
+                  </div>
+                  <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Охрана зафиксировала приход. Нажмите, чтобы присвоить реальные номера вагонов.
+                  </div>
                 </div>
-                <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Охрана зафиксировала приход. Нажмите, чтобы присвоить реальные номера вагонов.
+                <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>Внести →</span>
+              </div>
+            </div>
+          )}
+
+          {currentTab === 'home' && (
+            <>
+              {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)', background: 'var(--status-paused-bg)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                    <svg className="nav-icon-svg" style={{ stroke: 'var(--status-paused)', width: '18px', height: '18px' }} viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <h4 style={{ margin: 0, color: 'var(--status-paused)', fontSize: '13px', fontWeight: '800' }}>Требуют внимания диспетчера</h4>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#7f1d1d' }}>
+                    {forecastBreaches.length > 0 && <div>• <b>Риск срыва SLA:</b> {forecastBreaches.length} ваг.</div>}
+                    {readyNotDispatched.length > 0 && <div>• <b>Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
+                    {dqViolations.map((v, i) => <div key={i}>• <b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '4px 0 2px 0' }}>
+                <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)' }}>На территории депо</span>
+                <span style={{ fontSize: '18px', fontWeight: '900', color: 'var(--brand)' }}>{onSiteRepairs.length} ваг.</span>
+              </div>
+
+              <div className="stats-grid">
+                <div className="stat-box queue" onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
+                  <span className="stat-label">В очереди</span>
+                  <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span>
+                </div>
+                <div className="stat-box repair" onClick={() => goToWagons(CASE_STATUS.IN_REPAIR)}>
+                  <span className="stat-label">В ремонте</span>
+                  <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
+                </div>
+                <div className="stat-box paused" onClick={() => goToWagons(CASE_STATUS.PAUSED)}>
+                  <span className="stat-label">За задержано</span>
+                  <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
+                </div>
+                <div className="stat-box ready" onClick={() => goToWagons(CASE_STATUS.READY)}>
+                  <span className="stat-label">Готовы</span>
+                  <span className="stat-value">{readyNotDispatched.length}</span>
                 </div>
               </div>
-              <span style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>Внести →</span>
+
+              <div className="premium-card">
+                <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
+                  ⚡ Быстрые действия
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
+                    <button className="btn-primary" onClick={() => setShowAddModal(true)}>🛡️ Приход с КПП</button>
+                  )}
+                  {!isGuest && canManageWarehouse && (
+                    <button className="btn-secondary" onClick={() => openAddItemModal()}>+ Новый товар</button>
+                  )}
+                  <button className="btn-secondary" onClick={() => setCurrentTab('warehouse')}>📦 Склад ТМЦ</button>
+                  <button className="btn-secondary" onClick={() => setCurrentTab('analytics')}>📊 Аналитика</button>
+                </div>
+              </div>
+
+              {(() => {
+                const activeDelays = delayLogs.filter(d => !d.end_datetime);
+                if (activeDelays.length === 0) return null;
+                const matCount = activeDelays.filter(d => d.category === 'Materials').length;
+                const eqCount = activeDelays.filter(d => d.category === 'Equipment').length;
+                const custCount = activeDelays.filter(d => d.category === 'Customer').length;
+                const supplyMaster = getAssignedMaster('procurement').master;
+                const mechanicMaster = getAssignedMaster('mechanic').master;
+
+                return (
+                  <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-paused)' }}>🛑 Разбор задержек ({activeDelays.length})</span>
+                      <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => goToWagons(CASE_STATUS.PAUSED)}>Все →</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
+                        <span>📦 Запчасти / Материалы: <b>{matCount} ваг.</b></span>
+                        <span style={{ color: 'var(--text-secondary)' }}>Отв: {supplyMaster}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
+                        <span>🛠 Оборудование: <b>{eqCount} ваг.</b></span>
+                        <span style={{ color: 'var(--text-secondary)' }}>Отв: {mechanicMaster}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
+                        <span>👤 Ждём решения Заказчика: <b>{custCount} ваг.</b></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const criticalWagons = repairs
+                  .filter(r => r.current_status !== CASE_STATUS.READY)
+                  .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                  .slice(0, 3);
+
+                if (criticalWagons.length === 0) return null;
+
+                return (
+                  <div className="premium-card">
+                    <div style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px' }}>🔥 Наибольший простой</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {criticalWagons.map(item => {
+                        const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - new Date(item.created_at).getTime()) / (1000 * 60 * 60 * 24)));
+                        const isPaused = item.current_status === CASE_STATUS.PAUSED;
+                        const acceptedBy = getKppAcceptedBy(item);
+
+                        return (
+                          <div 
+                            key={item.repair_id} 
+                            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', cursor: 'pointer' }}
+                            onClick={() => openCaseDetails(item)}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
+                                № {item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Требует номера' : item.wagons?.wagon_number}
+                              </div>
+                              <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
+                                {item.repair_type} • {item.wagons?.owner || 'Собственный'}
+                              </div>
+                              {acceptedBy && (
+                                <div style={{ fontSize: '10px', color: 'var(--brand)', fontWeight: '600', marginTop: '2px' }}>
+                                  🛡️ Принял: {acceptedBy}
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontWeight: '800', color: isPaused ? 'var(--status-paused)' : daysOnSite > 3 ? 'var(--status-queue)' : 'var(--brand)' }}>
+                                {daysOnSite} дн.
+                              </span>
+                              <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>{STATUS_RU[item.current_status] || item.current_status}</div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const deficitItems = warehouseItems.filter(i => Number(i.quantity) <= Number(i.min_limit)).slice(0, 3);
+                if (deficitItems.length === 0) return null;
+
+                return (
+                  <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-queue)' }}>⚠️ Низкий остаток ТМЦ</span>
+                      <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => setCurrentTab('warehouse')}>Склад →</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
+                      {deficitItems.map(item => {
+                        const isZero = Number(item.quantity) <= 0;
+                        return (
+                          <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 8px', borderRadius: '6px' }}>
+                            <span>{item.name} <span style={{ color: 'var(--text-secondary)', fontSize: '9px' }}>({item.category})</span></span>
+                            <span style={{ fontWeight: 'bold', color: isZero ? 'var(--status-paused)' : 'var(--status-queue)' }}>
+                              {item.quantity} {item.unit} {isZero ? '(ДЕФИЦИТ)' : `(Мин: ${item.min_limit})`}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+
+          {currentTab === 'wagons' && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h3 style={{ margin: 0, fontSize: '16px' }}>
+                  Вагоны ({filteredRepairs.length})
+                </h3>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {isFilterActive && (
+                    <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--status-paused)' }} onClick={resetAllFilters}>
+                      Сбросить
+                    </button>
+                  )}
+                  <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
+                </div>
+              </div>
+
+              <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="search-wrapper">
+                  <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input 
+                    className="input-field" 
+                    type="text" 
+                    placeholder="Поиск по номеру вагона..." 
+                    value={searchQuery} 
+                    onChange={e => setSearchQuery(e.target.value)} 
+                  />
+                </div>
+
+                <div className="filters-grid">
+                  <select 
+                    className="select-field" 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    value={statusFilter || ''} 
+                    onChange={e => setStatusFilter(e.target.value || null)}
+                  >
+                    <option value="">Все статусы</option>
+                    <option value={CASE_STATUS.QUEUE}>В очереди</option>
+                    <option value={CASE_STATUS.IN_REPAIR}>В ремонте</option>
+                    <option value={CASE_STATUS.PAUSED}>За задержано</option>
+                    <option value={CASE_STATUS.READY}>Готов к отправке</option>
+                  </select>
+
+                  <select 
+                    className="select-field" 
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    value={repairTypeFilter || ''} 
+                    onChange={e => setRepairTypeFilter(e.target.value || null)}
+                  >
+                    <option value="">Все виды ремонта</option>
+                    <option value="ДР">Деповской (ДР)</option>
+                    <option value="КРП">Переоборудование (КРП)</option>
+                    <option value="ТР">Текущий (ТР)</option>
+                    <option value="КР">Капитальный (КР)</option>
+                  </select>
+                </div>
+
+                <select 
+                  className="select-field" 
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  value={delayCategoryFilter || ''} 
+                  onChange={e => setDelayCategoryFilter(e.target.value || null)}
+                >
+                  <option value="">Все категории задержек</option>
+                  <option value="Materials">📦 Запчасти / Материалы</option>
+                  <option value="Equipment">🛠 Поломка оборудования</option>
+                  <option value="Customer">👤 Заказчик</option>
+                  <option value="Railway">🚂 Железная дорога</option>
+                </select>
+              </div>
+
+              {filteredRepairs.length === 0 ? (
+                <div className="premium-card" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)', fontSize: '12px' }}>
+                  🔍 Вагоны по выбранным фильтрам не найдены
+                </div>
+              ) : (
+                filteredRepairs.map((item) => {
+                  const isUnassigned = item.wagons?.wagon_number?.startsWith('БЕЗ_№_');
+                  const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
+                  const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
+                  const acceptedBy = getKppAcceptedBy(item);
+                  
+                  const createdDate = item.created_at ? new Date(item.created_at) : new Date();
+                  const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                  const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+                  return (
+                    <div 
+                      key={item.repair_id} 
+                      className="premium-card" 
+                      onClick={() => openCaseDetails(item)} 
+                      style={{ 
+                        cursor: 'pointer', 
+                        borderLeft: isUnassigned ? '4px solid var(--status-queue)' : isBreached ? '4px solid var(--status-paused)' : 'none',
+                        background: isUnassigned ? 'var(--status-queue-bg)' : 'var(--card-bg)'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '15px', fontWeight: '800', color: isUnassigned ? 'var(--status-queue)' : 'var(--text-primary)' }}>
+                          {isUnassigned ? '⚠️ Не оформлен (Приход КПП)' : `№ ${item.wagons?.wagon_number}`}
+                        </span>
+                        <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
+                      </div>
+                      
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>
+                          {item.repair_type} • {item.wagons?.owner || 'Собственный'}
+                          {acceptedBy && <span style={{ color: 'var(--brand)', fontWeight: '600', marginLeft: '6px' }}>🛡️ {acceptedBy}</span>}
+                        </span>
+                        <span style={{ color: isBreached ? 'var(--status-paused)' : 'var(--text-secondary)', fontWeight: isBreached ? 'bold' : 'normal' }}>
+                          {isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
+                        </span>
+                      </div>
+
+                      <div style={{ fontSize: '11px', color: 'var(--brand)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        📅 Заход: {formattedDate} ({daysOnSite} дн.)
+                      </div>
+
+                      {activeDelay && (
+                        <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)', fontSize: '10px', color: 'var(--status-paused)' }}>
+                          <div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+
+              {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
+            </>
+          )}
+
+          {currentTab === 'warehouse' && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
+                {canManageWarehouse && (
+                  <button className="btn-primary" style={{ padding: '4px 10px', fontSize: '11px', width: 'auto' }} onClick={() => openAddItemModal()}>
+                    + Новый товар
+                  </button>
+                )}
+              </div>
+
+              <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div className="search-wrapper">
+                  <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <input 
+                    className="input-field" 
+                    type="text" 
+                    placeholder="Поиск детали или материала..." 
+                    value={warehouseSearch} 
+                    onChange={e => setWarehouseSearch(e.target.value)} 
+                  />
+                </div>
+
+                <select 
+                  className="select-field" 
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  value={warehouseCatFilter || ''} 
+                  onChange={e => setWarehouseCatFilter(e.target.value || null)}
+                >
+                  <option value="">Все цеха и категории</option>
+                  <option value="Тележечный цех">🔧 Тележечный цех</option>
+                  <option value="Колёсный цех">⚙️ Колёсный цех</option>
+                  <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
+                  <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
+                  <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
+                  <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
+                  <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {filteredWarehouseItems.map(item => {
+                  const isOutOfStock = Number(item.quantity) <= 0;
+                  const isLowStock = Number(item.quantity) <= Number(item.min_limit) && !isOutOfStock;
+                  
+                  return (
+                    <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--status-paused)' : isLowStock ? '4px solid var(--status-queue)' : '4px solid var(--status-ready)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{item.name}</div>
+                          <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{item.category}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div style={{ fontSize: '16px', fontWeight: '800', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
+                            {item.quantity} {item.unit}
+                          </div>
+                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
+                            Мин. норма: {item.min_limit} {item.unit}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)' }}>
+                        <span style={{ fontSize: '10px', fontWeight: 'bold', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
+                          {isOutOfStock ? '🔴 Нет на складе' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
+                        </span>
+
+                        {canManageWarehouse && (
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button 
+                              className="btn-primary" 
+                              style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: 'var(--status-ready)' }} 
+                              onClick={() => openStockAdjustModal(item, 'ADD')}
+                            >
+                              + Приход
+                            </button>
+                            <button 
+                              className="btn-secondary" 
+                              style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', color: 'var(--status-paused)' }} 
+                              onClick={() => openStockAdjustModal(item, 'SUBTRACT')}
+                            >
+                              − Списать
+                            </button>
+                            <button 
+                              className="btn-secondary" 
+                              style={{ padding: '3px 6px', fontSize: '10px', width: 'auto' }} 
+                              onClick={() => openAddItemModal(item)}
+                            >
+                              ✏️
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {currentTab === 'analytics' && (
+            <>
+              <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>📊 Сводный простой вагонов</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Активный налёт времени:</div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{Math.round(totalDwellHours).toLocaleString()} ч</div>
+                    <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({totalDwellDays} вагон-дней)</div>
+                  </div>
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Средний простой:</div>
+                    <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{avgHoursPerWagon} ч</div>
+                    <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({avgDaysPerWagon} дн/вагон)</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="premium-card">
+                <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>⏱️ Время цикла по видам ремонта</h3>
+                <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                      <span>🛠️ Деповской ремонт (ДР) — {drStats.count} ваг.</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
+                      <span>Медиана: <b>{drStats.medianHours} ч</b> ({drStats.medianDays} дн)</span>
+                      <span>90% вагонов: <b>{drStats.p90Hours} ч</b> ({drStats.p90Days} дн)</span>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                      <span>🔄 Переоборудование (КРП) — {krpStats.count} ваг.</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
+                      <span>Медиана: <b>{krpStats.medianHours} ч</b> ({krpStats.medianDays} дн)</span>
+                      <span>90% вагонов: <b>{krpStats.p90Hours} ч</b> ({krpStats.p90Days} дн)</span>
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
+                      <span>🔧 Текущий ремонт (ТР) — {trStats.count} ваг.</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
+                      <span>Медиана: <b>{trStats.medianHours} ч</b> ({trStats.medianDays} дн)</span>
+                      <span>90% вагонов: <b>{trStats.p90Hours} ч</b> ({trStats.p90Days} дн)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="premium-card">
+                <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--status-paused)' }}>🚨 Структура задержек (Парето)</h3>
+                {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => {
+                  const hours = Math.round(days * 24);
+                  const percent = Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100);
+                  const ruCat = CATEGORY_RU[cat] || cat;
+
+                  return (
+                    <div key={cat} style={{ marginBottom: '10px', background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 'bold', marginBottom: '4px' }}>
+                        <span>{ruCat}</span>
+                        <span style={{ color: 'var(--status-paused)' }}>{hours.toLocaleString()} ч ({days.toFixed(1)} дн)</span>
+                      </div>
+                      <div style={{ background: 'rgba(220, 38, 38, 0.1)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                        <div style={{ width: `${percent}%`, background: 'var(--status-paused)', height: '100%', borderRadius: '4px' }} />
+                      </div>
+                      <div style={{ textAlign: 'right', fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {percent.toFixed(1)}% от всех задержек
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {currentTab === 'profile' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div className="premium-card" style={{ textAlign: 'center' }}>
+                <h3 style={{ margin: '0 0 4px 0' }}>{user?.name || 'Сотрудник'}</h3>
+                <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
+                  Текущая роль: <b>{ROLES_LIST.find(r => r.key === activeRole)?.label || activeRole}</b> <br />
+                  <span style={{ color: 'var(--brand)', fontWeight: '600' }}>
+                    Telegram ID: {user?.telegram_id || 'Не определен'}
+                  </span>
+                </p>
+                {user && (
+                  <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', marginTop: '8px', color: 'var(--status-paused)' }} onClick={handleLogout}>
+                    Сменить аккаунт / Выйти ✕
+                  </button>
+                )}
+              </div>
+
+              {user?.role === 'ADMIN' ? (
+                <>
+                  {activeRole !== 'ADMIN' && (
+                    <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--status-queue)' }}>
+                          ⚠️ Режим тестирования другой роли
+                        </span>
+                        <button 
+                          className="btn-primary" 
+                          style={{ padding: '4px 8px', fontSize: '10px', width: 'auto' }}
+                          onClick={() => handleRoleChange('ADMIN')}
+                        >
+                          👑 Вернуть Админа
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Переключение режима роли (Тестирование)</h4>
+                    <select 
+                      className="select-field" 
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
+                      value={activeRole} 
+                      onChange={e => handleRoleChange(e.target.value)}
+                    >
+                      {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="premium-card">
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      {allUsersList.map(u => (
+                        <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
+                          <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                            <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
+                            <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
+                          </div>
+                          
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <select
+                              className="select-field"
+                              onPointerDown={(e) => e.stopPropagation()}
+                              onClick={(e) => e.stopPropagation()}
+                              style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
+                              value={u.role || 'GUEST'}
+                              onChange={async (e) => {
+                                const newRole = e.target.value;
+                                setLoading(true);
+                                vibrate('medium');
+
+                                const { error } = await supabase.rpc('update_user_role', {
+                                  p_target_user_id: u.id,
+                                  p_new_role: newRole,
+                                  p_user_id: getValidUserId(user)
+                                });
+
+                                if (!error) {
+                                  alert(`Права для ${u.name} изменены на: ${newRole}`);
+                                  setAllUsersList(prev => prev.map(userItem => 
+                                    userItem.id === u.id ? { ...userItem, role: newRole } : userItem
+                                  ));
+                                  loadData();
+                                } else {
+                                  alert('Ошибка изменения роли: ' + error.message);
+                                }
+                                setLoading(false);
+                              }}
+                            >
+                              {ROLES_LIST.map(r => (
+                                <option key={r.key} value={r.key}>{r.label}</option>
+                              ))}
+                            </select>
+
+                            <button
+                              className="btn-secondary"
+                              style={{ padding: '0 8px', fontSize: '11px', color: 'var(--status-paused)', width: 'auto' }}
+                              onClick={async () => {
+                                if (!window.confirm(`Удалить профиль "${u.name}" (${u.role})?`)) return;
+                                setLoading(true);
+                                vibrate('heavy');
+                                const { error } = await supabase.from('users').delete().eq('id', u.id);
+                                if (!error) {
+                                  setAllUsersList(prev => prev.filter(item => item.id !== u.id));
+                                } else {
+                                  alert('Ошибка удаления: ' + error.message);
+                                }
+                                setLoading(false);
+                              }}
+                            >
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
+                  🔒 Панель управления ролями доступна только Начальнику депо.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <nav className="bottom-nav">
+          <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
+            <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Главная</span>
+          </button>
+          <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}>
+            <svg className="nav-icon-svg" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+            <span>Вагоны</span>
+          </button>
+          <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}>
+            <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            <span>Склад</span>
+          </button>
+          <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}>
+            <svg className="nav-icon-svg" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            <span>Аналитика</span>
+          </button>
+          <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}>
+            <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Профиль</span>
+          </button>
+        </nav>
+
+        {!isGuest && showStockAdjustModal && adjustingItem && (
+          <div className="backdrop">
+            <div className="bottom-sheet">
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>
+                {adjustMode === 'ADD' ? '📥 Приход на склад' : '📤 Списание со склада'}
+              </h3>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '10px' }}>
+                {adjustingItem.name}
+              </div>
+
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
+                {adjustMode === 'ADD' ? 'Сколько поступило:' : 'Сколько списать:'}
+              </label>
+              <input 
+                className="input-field" 
+                style={{ marginTop: '4px', fontSize: '16px', fontWeight: 'bold' }} 
+                type="number" 
+                placeholder="10" 
+                value={stockDelta} 
+                onChange={e => setStockDelta(e.target.value)} 
+              />
+
+              <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
+                <div>В наличии сейчас: <b>{adjustingItem.quantity} {adjustingItem.unit}</b></div>
+                <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)', fontWeight: 'bold' }}>
+                  Станет на складе: {
+                    adjustMode === 'ADD'
+                      ? Number(adjustingItem.quantity) + (Number(stockDelta) || 0)
+                      : Math.max(0, Number(adjustingItem.quantity) - (Number(stockDelta) || 0))
+                  } {adjustingItem.unit}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+                <button className="btn-secondary" onClick={() => setShowStockAdjustModal(false)}>Отмена</button>
+                <button 
+                  className="btn-primary" 
+                  style={{ background: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)' }} 
+                  onClick={handleConfirmStockAdjust} 
+                  disabled={loading}
+                >
+                  {adjustMode === 'ADD' ? '✓ Подтвердить приход' : '✓ Подтвердить списание'}
+                </button>
+              </div>
             </div>
           </div>
         )}
 
-        {currentTab === 'home' && (
-          <>
-            {(dqViolations.length > 0 || forecastBreaches.length > 0 || readyNotDispatched.length > 0) && (
-              <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)', background: 'var(--status-paused-bg)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <svg className="nav-icon-svg" style={{ stroke: 'var(--status-paused)', width: '18px', height: '18px' }} viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-                  <h4 style={{ margin: 0, color: 'var(--status-paused)', fontSize: '13px', fontWeight: '800' }}>Требуют внимания диспетчера</h4>
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11px', color: '#7f1d1d' }}>
-                  {forecastBreaches.length > 0 && <div>• <b>Риск срыва SLA:</b> {forecastBreaches.length} ваг.</div>}
-                  {readyNotDispatched.length > 0 && <div>• <b>Ожидают отправки:</b> {readyNotDispatched.length} ваг.</div>}
-                  {dqViolations.map((v, i) => <div key={i}>• <b>Вагон №{v.wagon_number}:</b> {v.message}</div>)}
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', margin: '4px 0 2px 0' }}>
-              <span style={{ fontSize: '15px', fontWeight: '800', color: 'var(--text-primary)' }}>На территории депо</span>
-              <span style={{ fontSize: '18px', fontWeight: '900', color: 'var(--brand)' }}>{onSiteRepairs.length} ваг.</span>
-            </div>
-
-            <div className="stats-grid">
-              <div className="stat-box queue" onClick={() => goToWagons(CASE_STATUS.QUEUE)}>
-                <span className="stat-label">В очереди</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.QUEUE).length}</span>
-              </div>
-              <div className="stat-box repair" onClick={() => goToWagons(CASE_STATUS.IN_REPAIR)}>
-                <span className="stat-label">В ремонте</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.IN_REPAIR).length}</span>
-              </div>
-              <div className="stat-box paused" onClick={() => goToWagons(CASE_STATUS.PAUSED)}>
-                <span className="stat-label">За задержано</span>
-                <span className="stat-value">{repairs.filter(r => r.current_status === CASE_STATUS.PAUSED).length}</span>
-              </div>
-              <div className="stat-box ready" onClick={() => goToWagons(CASE_STATUS.READY)}>
-                <span className="stat-label">Готовы</span>
-                <span className="stat-value">{readyNotDispatched.length}</span>
-              </div>
-            </div>
-
-            <div className="premium-card">
-              <div style={{ fontSize: '11px', fontWeight: '800', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px' }}>
-                ⚡ Быстрые действия
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security' || activeRole === 'operator') && (
-                  <button className="btn-primary" onClick={() => setShowAddModal(true)}>🛡️ Приход с КПП</button>
-                )}
-                {!isGuest && canManageWarehouse && (
-                  <button className="btn-secondary" onClick={() => openAddItemModal()}>+ Новый товар</button>
-                )}
-                <button className="btn-secondary" onClick={() => setCurrentTab('warehouse')}>📦 Склад ТМЦ</button>
-                <button className="btn-secondary" onClick={() => setCurrentTab('analytics')}>📊 Аналитика</button>
-              </div>
-            </div>
-
-            {(() => {
-              const activeDelays = delayLogs.filter(d => !d.end_datetime);
-              if (activeDelays.length === 0) return null;
-              const matCount = activeDelays.filter(d => d.category === 'Materials').length;
-              const eqCount = activeDelays.filter(d => d.category === 'Equipment').length;
-              const custCount = activeDelays.filter(d => d.category === 'Customer').length;
-              const supplyMaster = getAssignedMaster('procurement').master;
-              const mechanicMaster = getAssignedMaster('mechanic').master;
-
-              return (
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--status-paused)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-paused)' }}>🛑 Разбор задержек ({activeDelays.length})</span>
-                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => goToWagons(CASE_STATUS.PAUSED)}>Все →</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
-                      <span>📦 Запчасти / Материалы: <b>{matCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-secondary)' }}>Отв: {supplyMaster}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
-                      <span>🛠 Оборудование: <b>{eqCount} ваг.</b></span>
-                      <span style={{ color: 'var(--text-secondary)' }}>Отв: {mechanicMaster}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px' }}>
-                      <span>👤 Ждём решения Заказчика: <b>{custCount} ваг.</b></span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {(() => {
-              const criticalWagons = repairs
-                .filter(r => r.current_status !== CASE_STATUS.READY)
-                .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-                .slice(0, 3);
-
-              if (criticalWagons.length === 0) return null;
-
-              return (
-                <div className="premium-card">
-                  <div style={{ fontSize: '12px', fontWeight: '800', color: 'var(--text-primary)', marginBottom: '8px' }}>🔥 Наибольший простой</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {criticalWagons.map(item => {
-                      const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - new Date(item.created_at).getTime()) / (1000 * 60 * 60 * 24)));
-                      const isPaused = item.current_status === CASE_STATUS.PAUSED;
-                      const acceptedBy = getKppAcceptedBy(item);
-
-                      return (
-                        <div 
-                          key={item.repair_id} 
-                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '8px 10px', borderRadius: '8px', fontSize: '11px', cursor: 'pointer' }}
-                          onClick={() => openCaseDetails(item)}
-                        >
-                          <div>
-                            <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
-                              № {item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Требует номера' : item.wagons?.wagon_number}
-                            </div>
-                            <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
-                              {item.repair_type} • {item.wagons?.owner || 'Собственный'}
-                            </div>
-                            {acceptedBy && (
-                              <div style={{ fontSize: '10px', color: 'var(--brand)', fontWeight: '600', marginTop: '2px' }}>
-                                🛡️ Принял: {acceptedBy}
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span style={{ fontWeight: '800', color: isPaused ? 'var(--status-paused)' : daysOnSite > 3 ? 'var(--status-queue)' : 'var(--brand)' }}>
-                              {daysOnSite} дн.
-                            </span>
-                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>{STATUS_RU[item.current_status] || item.current_status}</div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {(() => {
-              const deficitItems = warehouseItems.filter(i => Number(i.quantity) <= Number(i.min_limit)).slice(0, 3);
-              if (deficitItems.length === 0) return null;
-
-              return (
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '13px', fontWeight: '800', color: 'var(--status-queue)' }}>⚠️ Низкий остаток ТМЦ</span>
-                    <span style={{ fontSize: '11px', color: 'var(--brand)', cursor: 'pointer', fontWeight: '700' }} onClick={() => setCurrentTab('warehouse')}>Склад →</span>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-                    {deficitItems.map(item => {
-                      const isZero = Number(item.quantity) <= 0;
-                      return (
-                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 8px', borderRadius: '6px' }}>
-                          <span>{item.name} <span style={{ color: 'var(--text-secondary)', fontSize: '9px' }}>({item.category})</span></span>
-                          <span style={{ fontWeight: 'bold', color: isZero ? 'var(--status-paused)' : 'var(--status-queue)' }}>
-                            {item.quantity} {item.unit} {isZero ? '(ДЕФИЦИТ)' : `(Мин: ${item.min_limit})`}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-          </>
-        )}
-
-        {currentTab === 'wagons' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <h3 style={{ margin: 0, fontSize: '16px' }}>
-                Вагоны ({filteredRepairs.length})
-              </h3>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {isFilterActive && (
-                  <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px', color: 'var(--status-paused)' }} onClick={resetAllFilters}>
-                    Сбросить
-                  </button>
-                )}
-                <button className="btn-secondary" style={{ padding: '4px 8px', fontSize: '10px' }} onClick={exportToCSV}>💾 Excel</button>
-              </div>
-            </div>
-
-            <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div className="search-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input 
-                  className="input-field" 
-                  type="text" 
-                  placeholder="Поиск по номеру вагона..." 
-                  value={searchQuery} 
-                  onChange={e => setSearchQuery(e.target.value)} 
-                />
-              </div>
-
-              <div className="filters-grid">
-                <select 
-                  className="select-field" 
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  value={statusFilter || ''} 
-                  onChange={e => setStatusFilter(e.target.value || null)}
-                >
-                  <option value="">Все статусы</option>
-                  <option value={CASE_STATUS.QUEUE}>В очереди</option>
-                  <option value={CASE_STATUS.IN_REPAIR}>В ремонте</option>
-                  <option value={CASE_STATUS.PAUSED}>За задержано</option>
-                  <option value={CASE_STATUS.READY}>Готов к отправке</option>
-                </select>
-
-                <select 
-                  className="select-field" 
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  value={repairTypeFilter || ''} 
-                  onChange={e => setRepairTypeFilter(e.target.value || null)}
-                >
-                  <option value="">Все виды ремонта</option>
-                  <option value="ДР">Деповской (ДР)</option>
-                  <option value="КРП">Переоборудование (КРП)</option>
-                  <option value="ТР">Текущий (ТР)</option>
-                  <option value="КР">Капитальный (КР)</option>
-                </select>
-              </div>
-
+        {!isGuest && showItemModal && (
+          <div className="backdrop">
+            <div className="bottom-sheet">
+              <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Параметры и ревизия ТМЦ' : 'Новый товар на склад'}</h3>
+              
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Наименование позиции:</label>
+              <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
+              
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Цех / Категория:</label>
               <select 
                 className="select-field" 
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => e.stopPropagation()}
-                value={delayCategoryFilter || ''} 
-                onChange={e => setDelayCategoryFilter(e.target.value || null)}
+                style={{ marginTop: '2px' }} 
+                value={itemCategory} 
+                onChange={e => setItemCategory(e.target.value)}
               >
-                <option value="">Все категории задержек</option>
-                <option value="Materials">📦 Запчасти / Материалы</option>
-                <option value="Equipment">🛠 Поломка оборудования</option>
-                <option value="Customer">👤 Заказчик</option>
-                <option value="Railway">🚂 Железная дорога</option>
-              </select>
-            </div>
-
-            {filteredRepairs.length === 0 ? (
-              <div className="premium-card" style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)', fontSize: '12px' }}>
-                🔍 Вагоны по выбранным фильтрам не найдены
-              </div>
-            ) : (
-              filteredRepairs.map((item) => {
-                const isUnassigned = item.wagons?.wagon_number?.startsWith('БЕЗ_№_');
-                const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
-                const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
-                const acceptedBy = getKppAcceptedBy(item);
-                
-                const createdDate = item.created_at ? new Date(item.created_at) : new Date();
-                const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-                const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)));
-
-                return (
-                  <div 
-                    key={item.repair_id} 
-                    className="premium-card" 
-                    onClick={() => openCaseDetails(item)} 
-                    style={{ 
-                      cursor: 'pointer', 
-                      borderLeft: isUnassigned ? '4px solid var(--status-queue)' : isBreached ? '4px solid var(--status-paused)' : 'none',
-                      background: isUnassigned ? 'var(--status-queue-bg)' : 'var(--card-bg)'
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                      <span style={{ fontSize: '15px', fontWeight: '800', color: isUnassigned ? 'var(--status-queue)' : 'var(--text-primary)' }}>
-                        {isUnassigned ? '⚠️ Не оформлен (Приход КПП)' : `№ ${item.wagons?.wagon_number}`}
-                      </span>
-                      <span className="status-pill">{STATUS_RU[item.current_status] || item.current_status}</span>
-                    </div>
-                    
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>
-                        {item.repair_type} • {item.wagons?.owner || 'Собственный'}
-                        {acceptedBy && <span style={{ color: 'var(--brand)', fontWeight: '600', marginLeft: '6px' }}>🛡️ {acceptedBy}</span>}
-                      </span>
-                      <span style={{ color: isBreached ? 'var(--status-paused)' : 'var(--text-secondary)', fontWeight: isBreached ? 'bold' : 'normal' }}>
-                        {isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '11px', color: 'var(--brand)', marginTop: '4px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                      📅 Заход: {formattedDate} ({daysOnSite} дн.)
-                    </div>
-
-                    {activeDelay && (
-                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)', fontSize: '10px', color: 'var(--status-paused)' }}>
-                        <div><b>⛔ {CATEGORY_RU[activeDelay.category] || activeDelay.category}:</b> {activeDelay.cause}</div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-
-            {!isGuest && (activeRole === 'ADMIN' || activeRole === 'security') && <button className="fab" onClick={() => setShowAddModal(true)}>+</button>}
-          </>
-        )}
-
-        {currentTab === 'warehouse' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '16px' }}>Остатки склада ({filteredWarehouseItems.length})</h3>
-              {canManageWarehouse && (
-                <button className="btn-primary" style={{ padding: '4px 10px', fontSize: '11px', width: 'auto' }} onClick={() => openAddItemModal()}>
-                  + Новый товар
-                </button>
-              )}
-            </div>
-
-            <div className="premium-card" style={{ padding: '10px', marginBottom: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div className="search-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input 
-                  className="input-field" 
-                  type="text" 
-                  placeholder="Поиск детали или материала..." 
-                  value={warehouseSearch} 
-                  onChange={e => setWarehouseSearch(e.target.value)} 
-                />
-              </div>
-
-              <select 
-                className="select-field" 
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => e.stopPropagation()}
-                value={warehouseCatFilter || ''} 
-                onChange={e => setWarehouseCatFilter(e.target.value || null)}
-              >
-                <option value="">Все цеха и категории</option>
                 <option value="Тележечный цех">🔧 Тележечный цех</option>
                 <option value="Колёсный цех">⚙️ Колёсный цех</option>
                 <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
@@ -1383,861 +1706,496 @@ export default function App() {
                 <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
                 <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
               </select>
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {filteredWarehouseItems.map(item => {
-                const isOutOfStock = Number(item.quantity) <= 0;
-                const isLowStock = Number(item.quantity) <= Number(item.min_limit) && !isOutOfStock;
-                
-                return (
-                  <div key={item.id} className="premium-card" style={{ borderLeft: isOutOfStock ? '4px solid var(--status-paused)' : isLowStock ? '4px solid var(--status-queue)' : '4px solid var(--status-ready)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <div style={{ fontSize: '14px', fontWeight: 'bold' }}>{item.name}</div>
-                        <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>{item.category}</div>
-                      </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '16px', fontWeight: '800', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
-                          {item.quantity} {item.unit}
-                        </div>
-                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)' }}>
-                          Мин. норма: {item.min_limit} {item.unit}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', paddingTop: '6px', borderTop: '1px dashed var(--border-subtle)' }}>
-                      <span style={{ fontSize: '10px', fontWeight: 'bold', color: isOutOfStock ? 'var(--status-paused)' : isLowStock ? 'var(--status-queue)' : 'var(--status-ready)' }}>
-                        {isOutOfStock ? '🔴 Нет на складе' : isLowStock ? '🟡 Низкий остаток' : '🟢 В наличии'}
-                      </span>
-
-                      {canManageWarehouse && (
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button 
-                            className="btn-primary" 
-                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', background: 'var(--status-ready)' }} 
-                            onClick={() => openStockAdjustModal(item, 'ADD')}
-                          >
-                            + Приход
-                          </button>
-                          <button 
-                            className="btn-secondary" 
-                            style={{ padding: '3px 8px', fontSize: '10px', width: 'auto', color: 'var(--status-paused)' }} 
-                            onClick={() => openStockAdjustModal(item, 'SUBTRACT')}
-                          >
-                            − Списать
-                          </button>
-                          <button 
-                            className="btn-secondary" 
-                            style={{ padding: '3px 6px', fontSize: '10px', width: 'auto' }} 
-                            onClick={() => openAddItemModal(item)}
-                          >
-                            ✏️
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {currentTab === 'analytics' && (
-          <>
-            <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>📊 Сводный простой вагонов</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
-                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Активный налёт времени:</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{Math.round(totalDwellHours).toLocaleString()} ч</div>
-                  <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({totalDwellDays} вагон-дней)</div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Текущий остаток:</label>
+                  <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="10" value={itemQty} onChange={e => setItemQty(e.target.value)} />
                 </div>
-                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>Средний простой:</div>
-                  <div style={{ fontSize: '14px', fontWeight: 'bold', marginTop: '2px' }}>{avgHoursPerWagon} ч</div>
-                  <div style={{ fontSize: '10px', color: 'var(--brand)' }}>({avgDaysPerWagon} дн/вагон)</div>
+                <div style={{ flex: 0.8 }}>
+                  <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ед. изм.:</label>
+                  <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="шт / л / кг" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
                 </div>
               </div>
-            </div>
 
-            <div className="premium-card">
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px' }}>⏱️ Время цикла по видам ремонта</h3>
-              <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
-                    <span>🛠️ Деповской ремонт (ДР) — {drStats.count} ваг.</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
-                    <span>Медиана: <b>{drStats.medianHours} ч</b> ({drStats.medianDays} дн)</span>
-                    <span>90% вагонов: <b>{drStats.p90Hours} ч</b> ({drStats.p90Days} дн)</span>
-                  </div>
-                </div>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Минимальный порог дефицита:</label>
+              <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="5" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
 
-                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
-                    <span>🔄 Переоборудование (КРП) — {krpStats.count} ваг.</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
-                    <span>Медиана: <b>{krpStats.medianHours} ч</b> ({krpStats.medianDays} дн)</span>
-                    <span>90% вагонов: <b>{krpStats.p90Hours} ч</b> ({krpStats.p90Days} дн)</span>
-                  </div>
-                </div>
-
-                <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '4px' }}>
-                    <span>🔧 Текущий ремонт (ТР) — {trStats.count} ваг.</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: '10px' }}>
-                    <span>Медиана: <b>{trStats.medianHours} ч</b> ({trStats.medianDays} дн)</span>
-                    <span>90% вагонов: <b>{trStats.p90Hours} ч</b> ({trStats.p90Days} дн)</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="premium-card">
-              <h3 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--status-paused)' }}>🚨 Структура задержек (Парето)</h3>
-              {(Object.entries(lostWagonDays.byCategory) as [string, number][]).map(([cat, days]) => {
-                const hours = Math.round(days * 24);
-                const percent = Math.min(100, (days / (lostWagonDays.totalDays || 1)) * 100);
-                const ruCat = CATEGORY_RU[cat] || cat;
-
-                return (
-                  <div key={cat} style={{ marginBottom: '10px', background: 'var(--bg-main)', padding: '8px', borderRadius: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 'bold', marginBottom: '4px' }}>
-                      <span>{ruCat}</span>
-                      <span style={{ color: 'var(--status-paused)' }}>{hours.toLocaleString()} ч ({days.toFixed(1)} дн)</span>
-                    </div>
-                    <div style={{ background: 'rgba(220, 38, 38, 0.1)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ width: `${percent}%`, background: 'var(--status-paused)', height: '100%', borderRadius: '4px' }} />
-                    </div>
-                    <div style={{ textAlign: 'right', fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                      {percent.toFixed(1)}% от всех задержек
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {currentTab === 'profile' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            <div className="premium-card" style={{ textAlign: 'center' }}>
-              <h3 style={{ margin: '0 0 4px 0' }}>{user?.name || 'Сотрудник'}</h3>
-              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '4px 0 0 0' }}>
-                Текущая роль: <b>{ROLES_LIST.find(r => r.key === activeRole)?.label || activeRole}</b> <br />
-                <span style={{ color: 'var(--brand)', fontWeight: '600' }}>
-                  Telegram ID: {user?.telegram_id || 'Не определен'}
-                </span>
-              </p>
-              {user && (
-                <button className="btn-secondary" style={{ padding: '4px 10px', fontSize: '11px', marginTop: '8px', color: 'var(--status-paused)' }} onClick={handleLogout}>
-                  Сменить аккаунт / Выйти ✕
+              <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
+                <button className="btn-secondary" onClick={() => setShowItemModal(false)}>Отмена</button>
+                <button className="btn-primary" onClick={handleSaveWarehouseItem} disabled={loading}>
+                  Сохранить
                 </button>
-              )}
-            </div>
-
-            {user?.role === 'ADMIN' ? (
-              <>
-                {activeRole !== 'ADMIN' && (
-                  <div className="premium-card" style={{ borderLeft: '4px solid var(--status-queue)', background: 'var(--status-queue-bg)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--status-queue)' }}>
-                        ⚠️ Режим тестирования другой роли
-                      </span>
-                      <button 
-                        className="btn-primary" 
-                        style={{ padding: '4px 8px', fontSize: '10px', width: 'auto' }}
-                        onClick={() => handleRoleChange('ADMIN')}
-                      >
-                        👑 Вернуть Админа
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', color: 'var(--brand)' }}>🔑 Переключение режима роли (Тестирование)</h4>
-                  <select 
-                    className="select-field" 
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }} 
-                    value={activeRole} 
-                    onChange={e => handleRoleChange(e.target.value)}
-                  >
-                    {ROLES_LIST.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
-                  </select>
-                </div>
-
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', color: 'var(--brand)' }}>👥 Назначение ролей сотрудникам депо</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {allUsersList.map(u => (
-                      <div key={u.id} className="user-row-card" style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px' }}>
-                        <div className="user-row-header" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <span style={{ fontWeight: 'bold', fontSize: '13px' }}>{u.name || 'Сотрудник'}</span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>ID: {u.telegram_id}</span>
-                        </div>
-                        
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <select
-                            className="select-field"
-                            onPointerDown={(e) => e.stopPropagation()}
-                            onClick={(e) => e.stopPropagation()}
-                            style={{ margin: 0, fontSize: '11px', fontWeight: '600', flex: 1 }}
-                            value={u.role || 'GUEST'}
-                            onChange={async (e) => {
-                              const newRole = e.target.value;
-                              setLoading(true);
-                              vibrate('medium');
-
-                              const { error } = await supabase.rpc('update_user_role', {
-                                p_target_user_id: u.id,
-                                p_new_role: newRole,
-                                p_user_id: getValidUserId(user)
-                              });
-
-                              if (!error) {
-                                alert(`Права для ${u.name} изменены на: ${newRole}`);
-                                setAllUsersList(prev => prev.map(userItem => 
-                                  userItem.id === u.id ? { ...userItem, role: newRole } : userItem
-                                ));
-                                loadData();
-                              } else {
-                                alert('Ошибка изменения роли: ' + error.message);
-                              }
-                              setLoading(false);
-                            }}
-                          >
-                            {ROLES_LIST.map(r => (
-                              <option key={r.key} value={r.key}>{r.label}</option>
-                            ))}
-                          </select>
-
-                          <button
-                            className="btn-secondary"
-                            style={{ padding: '0 8px', fontSize: '11px', color: 'var(--status-paused)', width: 'auto' }}
-                            onClick={async () => {
-                              if (!window.confirm(`Удалить профиль "${u.name}" (${u.role})?`)) return;
-                              setLoading(true);
-                              vibrate('heavy');
-                              const { error } = await supabase.from('users').delete().eq('id', u.id);
-                              if (!error) {
-                                setAllUsersList(prev => prev.filter(item => item.id !== u.id));
-                              } else {
-                                alert('Ошибка удаления: ' + error.message);
-                              }
-                              setLoading(false);
-                            }}
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="premium-card" style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '11px' }}>
-                🔒 Панель управления ролями доступна только Начальнику депо.
               </div>
-            )}
+            </div>
           </div>
         )}
-      </div>
 
-      <nav className="bottom-nav">
-        <button className={`nav-item ${currentTab === 'home' ? 'active' : ''}`} onClick={() => setCurrentTab('home')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-          <span>Главная</span>
-        </button>
-        <button className={`nav-item ${currentTab === 'wagons' ? 'active' : ''}`} onClick={() => setCurrentTab('wagons')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
-          <span>Вагоны</span>
-        </button>
-        <button className={`nav-item ${currentTab === 'warehouse' ? 'active' : ''}`} onClick={() => setCurrentTab('warehouse')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
-          <span>Склад</span>
-        </button>
-        <button className={`nav-item ${currentTab === 'analytics' ? 'active' : ''}`} onClick={() => setCurrentTab('analytics')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-          <span>Аналитика</span>
-        </button>
-        <button className={`nav-item ${currentTab === 'profile' ? 'active' : ''}`} onClick={() => setCurrentTab('profile')}>
-          <svg className="nav-icon-svg" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          <span>Профиль</span>
-        </button>
-      </nav>
+        {!isGuest && showAddModal && (
+          <div className="backdrop">
+            <div className="bottom-sheet">
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>🛡️ КПП: Приемка состава</h3>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 10px 0' }}>
+                Укажите количество прибывших вагонов. Номера вагонов сможет позже занести Оператор/Диспетчер.
+              </p>
 
-      {!isGuest && showStockAdjustModal && adjustingItem && (
-        <div className="backdrop">
-          <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>
-              {adjustMode === 'ADD' ? '📥 Приход на склад' : '📤 Списание со склада'}
-            </h3>
-            <div style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '10px' }}>
-              {adjustingItem.name}
-            </div>
+              <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Количество вагонов:</label>
+              <input 
+                className="input-field" 
+                style={{ marginTop: '4px', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }} 
+                type="number" 
+                min={1} 
+                max={100} 
+                value={arrivalCount} 
+                onChange={e => setArrivalCount(e.target.value)} 
+              />
 
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>
-              {adjustMode === 'ADD' ? 'Сколько поступило:' : 'Сколько списать:'}
-            </label>
-            <input 
-              className="input-field" 
-              style={{ marginTop: '4px', fontSize: '16px', fontWeight: 'bold' }} 
-              type="number" 
-              placeholder="10" 
-              value={stockDelta} 
-              onChange={e => setStockDelta(e.target.value)} 
-            />
-
-            <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', margin: '10px 0', fontSize: '12px' }}>
-              <div>В наличии сейчас: <b>{adjustingItem.quantity} {adjustingItem.unit}</b></div>
-              <div style={{ marginTop: '4px', color: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)', fontWeight: 'bold' }}>
-                Станет на складе: {
-                  adjustMode === 'ADD'
-                    ? Number(adjustingItem.quantity) + (Number(stockDelta) || 0)
-                    : Math.max(0, Number(adjustingItem.quantity) - (Number(stockDelta) || 0))
-                } {adjustingItem.unit}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '16px' }}>
+                <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
+                <button className="btn-primary" onClick={handleKppArrival} disabled={loading}>
+                  Зарегистрировать ({arrivalCount || '0'} ваг.)
+                </button>
               </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
-              <button className="btn-secondary" onClick={() => setShowStockAdjustModal(false)}>Отмена</button>
-              <button 
-                className="btn-primary" 
-                style={{ background: adjustMode === 'ADD' ? 'var(--status-ready)' : 'var(--status-paused)' }} 
-                onClick={handleConfirmStockAdjust} 
-                disabled={loading}
-              >
-                {adjustMode === 'ADD' ? '✓ Подтвердить приход' : '✓ Подтвердить списание'}
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {!isGuest && showItemModal && (
-        <div className="backdrop">
-          <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', fontSize: '15px' }}>📦 {editingItem ? 'Параметры и ревизия ТМЦ' : 'Новый товар на склад'}</h3>
-            
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Наименование позиции:</label>
-            <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="Например: Пена монтажная" value={itemName} onChange={e => setItemName(e.target.value)} />
-            
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Цех / Категория:</label>
-            <select 
-              className="select-field" 
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              style={{ marginTop: '2px' }} 
-              value={itemCategory} 
-              onChange={e => setItemCategory(e.target.value)}
-            >
-              <option value="Тележечный цех">🔧 Тележечный цех</option>
-              <option value="Колёсный цех">⚙️ Колёсный цех</option>
-              <option value="Автотормозной цех (АКП)">🛑 Автотормозной цех (АКП)</option>
-              <option value="Контрольный пункт автосцепки (КПА)">⚡ КПА (Автосцепка)</option>
-              <option value="Ремонтно-заготовительный цех">📐 Ремонтно-заготовительный цех</option>
-              <option value="Цех механического оборудования">⛓️ Цех мехоборудования</option>
-              <option value="Вагоносборочный цех">🔨 Вагоносборочный цех</option>
-            </select>
-
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <div style={{ flex: 1 }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Текущий остаток:</label>
-                <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="10" value={itemQty} onChange={e => setItemQty(e.target.value)} />
-              </div>
-              <div style={{ flex: 0.8 }}>
-                <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Ед. изм.:</label>
-                <input className="input-field" style={{ marginTop: '2px' }} type="text" placeholder="шт / л / кг" value={itemUnit} onChange={e => setItemUnit(e.target.value)} />
-              </div>
-            </div>
-
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Минимальный порог дефицита:</label>
-            <input className="input-field" style={{ marginTop: '2px' }} type="number" placeholder="5" value={itemMinLimit} onChange={e => setItemMinLimit(e.target.value)} />
-
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}>
-              <button className="btn-secondary" onClick={() => setShowItemModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleSaveWarehouseItem} disabled={loading}>
-                Сохранить
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!isGuest && showAddModal && (
-        <div className="backdrop">
-          <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 6px 0', fontSize: '15px' }}>🛡️ КПП: Приемка состава</h3>
-            <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 10px 0' }}>
-              Укажите количество прибывших вагонов. Номера вагонов сможет позже занести Оператор/Диспетчер.
-            </p>
-
-            <label style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Количество вагонов:</label>
-            <input 
-              className="input-field" 
-              style={{ marginTop: '4px', fontSize: '18px', fontWeight: 'bold', textAlign: 'center' }} 
-              type="number" 
-              min={1} 
-              max={100} 
-              value={arrivalCount} 
-              onChange={e => setArrivalCount(e.target.value)} 
-            />
-
-            <div style={{ display: 'flex', gap: '6px', marginTop: '16px' }}>
-              <button className="btn-secondary" onClick={() => setShowAddModal(false)}>Отмена</button>
-              <button className="btn-primary" onClick={handleKppArrival} disabled={loading}>
-                Зарегистрировать ({arrivalCount || '0'} ваг.)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedCase && !showDelayModal && (
-        <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
-          <div className="bottom-sheet">
-            <div className="sheet-handle"></div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '18px' }}>
-                  {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Вагон без номера' : `№ ${selectedCase.wagons?.wagon_number}`}
-                </h3>
-                <span className="status-pill">{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
-              </div>
-              <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
-            </div>
-
-            {canEditWagonNumber && (
-              <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
-                <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
-                  {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '✏️ Присвоить реальный 8-значный номер вагона:' : '✏️ Изменить номер вагона:'}
+        {selectedCase && !showDelayModal && (
+          <div className="backdrop" onClick={(e) => { if (e.target === e.currentTarget) setSelectedCase(null); }}>
+            <div className="bottom-sheet">
+              <div className="sheet-handle"></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px' }}>
+                    {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Вагон без номера' : `№ ${selectedCase.wagons?.wagon_number}`}
+                  </h3>
+                  <span className="status-pill">{STATUS_RU[selectedCase.current_status] || selectedCase.current_status}</span>
                 </div>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <input 
-                    className="input-field" 
-                    style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', background: '#ffffff' }} 
-                    type="text" 
-                    maxLength={8} 
-                    placeholder="Например: 51234567" 
-                    value={editingWagonNum} 
-                    onChange={e => setEditingWagonNum(e.target.value.replace(/\D/g, ''))} 
-                  />
-                  <button className="btn-primary" style={{ width: 'auto', padding: '0 12px', fontSize: '11px' }} onClick={handleSaveWagonNumber} disabled={loading || editingWagonNum.length !== 8}>
-                    💾 Сохранить
-                  </button>
-                </div>
+                <button onClick={() => setSelectedCase(null)} style={{ background: 'transparent', border: 'none', fontSize: '16px' }}>✕</button>
               </div>
-            )}
 
-            <div className="premium-card">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>
-                  📅 Дата захода в депо: {new Date(selectedCase.created_at).toLocaleString('ru-RU')}
+              {canEditWagonNumber && (
+                <div className="premium-card" style={{ borderLeft: '4px solid var(--brand)', background: 'var(--brand-light)' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: 'var(--brand)', marginBottom: '6px' }}>
+                    {selectedCase.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '✏️ Присвоить реальный 8-значный номер вагона:' : '✏️ Изменить номер вагона:'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <input 
+                      className="input-field" 
+                      style={{ margin: 0, fontSize: '14px', fontWeight: 'bold', background: '#ffffff' }} 
+                      type="text" 
+                      maxLength={8} 
+                      placeholder="Например: 51234567" 
+                      value={editingWagonNum} 
+                      onChange={e => setEditingWagonNum(e.target.value.replace(/\D/g, ''))} 
+                    />
+                    <button className="btn-primary" style={{ width: 'auto', padding: '0 12px', fontSize: '11px' }} onClick={handleSaveWagonNumber} disabled={loading || editingWagonNum.length !== 8}>
+                      💾 Сохранить
+                    </button>
+                  </div>
                 </div>
+              )}
 
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
-                  <select 
-                    className="select-field" 
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
-                    value={selectedCase.repair_type || 'ДР'} 
-                    disabled={!canEditRepairTypeAndOwner || loading}
-                    onChange={async (e) => {
-                      const newType = e.target.value;
-                      setLoading(true);
-                      const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: getValidUserId(user) });
-                      if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
-                      else { alert('Ошибка смены вида ремонта: ' + error.message); }
-                      setLoading(false);
-                    }}>
-                    <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
-                  </select>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Собственник:</span>
-                  <input 
-                    className="input-field" 
-                    style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
-                    type="text" 
-                    value={selectedCase.wagons?.owner || ''} 
-                    disabled={!canEditRepairTypeAndOwner || loading}
-                    placeholder="Укажите собственника"
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedCase({ ...selectedCase, wagons: { ...selectedCase.wagons, owner: val } });
-                    }}
-                    onBlur={async (e) => {
-                      if (!selectedCase.wagons?.id) return;
-                      await supabase.rpc('update_wagon_owner', { 
-                        p_wagon_id: selectedCase.wagons.id, 
-                        p_owner: e.target.value, 
-                        p_user_id: getValidUserId(user) 
-                      });
-                      loadData();
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {!isInitialPhase && (
               <div className="premium-card">
-                <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ Этапы ремонта и Ответственные цехов</h4>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {DEFAULT_SHOPS.map(s => {
-                    const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
-                    const masterInfo = getAssignedMaster(s.key);
-                    const isInProgress = prog.status === 'IN_PROGRESS';
-                    const isDone = prog.status === 'DONE';
-                    const isNotRequired = prog.status === 'NOT_REQUIRED';
-                    const canEdit = canPerformAction(s.key);
-                    const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, shopMasters[s.key]?.targetHours || 4);
-
-                    return (
-                      <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
-                        <div>
-                          <div style={{ fontWeight: 'bold' }}>{s.label}
-                            {!isNotRequired && timeInfo.text && (
-                              <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
-                                ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b></div>
-                        </div>
-                        <div>
-                          {isDone ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
-                              {canReworkShop(s.key) && (
-                                <button 
-                                  className="btn-secondary" 
-                                  style={{ padding: '2px 6px', fontSize: '9px', color: 'var(--status-paused)' }} 
-                                  onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} 
-                                  disabled={loading}
-                                >
-                                  ↺ Доработка
-                                </button>
-                              )}
-                            </div>
-                          ) : isNotRequired ? (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold', fontSize: '10px' }}>— Не требуется</span>
-                              {canEdit && (
-                                <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '9px' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
-                                  В работу
-                                </button>
-                              )}
-                            </div>
-                          ) : isInProgress ? (
-                            canEdit ? (
-                              <div style={{ display: 'flex', gap: '4px' }}>
-                                <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button>
-                              </div>
-                            ) : <span style={{ color: 'var(--brand)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
-                          ) : (
-                            canEdit ? (
-                              <div style={{ display: 'flex', gap: '4px' }}>
-                                <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button>
-                                <button className="btn-secondary" style={{ padding: '3px 6px', fontSize: '10px', width: 'auto', color: 'var(--text-secondary)' }} onClick={() => handleUpdateShopStage(s.key, 'NOT_REQUIRED')} disabled={loading}>Н/Т</button>
-                              </div>
-                            ) : <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>⏳ Ожидает</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {isInitialPhase ? (
-              <>
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
-                  
-                  <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontWeight: 'bold' }}>📸 Фото / Сканы Акта ВУ-22:</div>
-                      <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--status-ready)' : 'var(--status-paused)', marginTop: '2px' }}>
-                        {hasActPhoto ? `✓ Загружено файлов: ${actPhotoDocs.length} шт.` : '❌ Файлы не прикреплены (завоз заблокирован)'}
-                      </div>
-                    </div>
-
-                    {canUploadDocs && (
-                      <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
-                        {hasActPhoto ? '📷 Добавить ещё' : '📷 Загрузить фото'}
-                        <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
-                      </label>
-                    )}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ fontSize: '11px', color: 'var(--brand)', fontWeight: 'bold' }}>
+                    📅 Дата захода в депо: {new Date(selectedCase.created_at).toLocaleString('ru-RU')}
                   </div>
 
-                  {hasActPhoto && (
-                    <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'right' }}>
-                      {actPhotoDocs.map((doc, idx) => (
-                        <a key={doc.id || idx} href={doc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 'bold' }}>
-                          🔍 Открыть фото акта #{idx + 1}
-                        </a>
-                      ))}
-                    </div>
-                  )}
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Вид ремонта:</span>
+                    <select 
+                      className="select-field" 
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                      value={selectedCase.repair_type || 'ДР'} 
+                      disabled={!canEditRepairTypeAndOwner || loading}
+                      onChange={async (e) => {
+                        const newType = e.target.value;
+                        setLoading(true);
+                        const { error } = await supabase.rpc('update_repair_type', { p_repair_id: selectedCase.repair_id, p_repair_type: newType, p_user_id: getValidUserId(user) });
+                        if (!error) { setSelectedCase({ ...selectedCase, repair_type: newType }); loadData(); } 
+                        else { alert('Ошибка смены вида ремонта: ' + error.message); }
+                        setLoading(false);
+                      }}>
+                      <option value="КР">КР (Капитальный)</option><option value="ДР">ДР (Деповской)</option><option value="ТР">ТР (Текущий)</option><option value="КРП">КРП (С продлением)</option><option value="ДРП">ДРП (Деповской с продлением)</option>
+                    </select>
+                  </div>
 
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 'bold', width: '90px' }}>Собственник:</span>
+                    <input 
+                      className="input-field" 
+                      style={{ margin: 0, padding: '4px 8px', fontSize: '11px', flex: 1 }} 
+                      type="text" 
+                      value={selectedCase.wagons?.owner || ''} 
+                      disabled={!canEditRepairTypeAndOwner || loading}
+                      placeholder="Укажите собственника"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setSelectedCase({ ...selectedCase, wagons: { ...selectedCase.wagons, owner: val } });
+                      }}
+                      onBlur={async (e) => {
+                        if (!selectedCase.wagons?.id) return;
+                        await supabase.rpc('update_wagon_owner', { 
+                          p_wagon_id: selectedCase.wagons.id, 
+                          p_owner: e.target.value, 
+                          p_user_id: getValidUserId(user) 
+                        });
+                        loadData();
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {!isInitialPhase && (
+                <div className="premium-card">
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ Этапы ремонта и Ответственные цехов</h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {ACT_SIGNING_SHOPS.map(s => {
-                      const sig = selectedCase.shop_signatures?.[s.key];
+                    {DEFAULT_SHOPS.map(s => {
+                      const prog = selectedCase.shop_progress?.[s.key] || { status: 'PENDING' };
                       const masterInfo = getAssignedMaster(s.key);
+                      const isInProgress = prog.status === 'IN_PROGRESS';
+                      const isDone = prog.status === 'DONE';
+                      const isNotRequired = prog.status === 'NOT_REQUIRED';
                       const canEdit = canPerformAction(s.key);
-                      const isNotRequired = sig?.master_name === 'Не требуется';
+                      const timeInfo = renderShopTimeInfo(prog.start_at, prog.end_at, shopMasters[s.key]?.targetHours || 4);
 
                       return (
-                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                        <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: isInProgress ? 'var(--status-repair-bg)' : 'var(--bg-main)', borderLeft: isInProgress ? '3px solid var(--brand)' : 'none', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
                           <div>
-                            <b>{s.label}</b>
-                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b>{sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
+                            <div style={{ fontWeight: 'bold' }}>{s.label}
+                              {!isNotRequired && timeInfo.text && (
+                                <span style={{ color: timeInfo.isOverdue ? 'var(--status-paused)' : isInProgress ? 'var(--brand)' : 'var(--text-secondary)', fontSize: '10px', marginLeft: '4px', fontWeight: timeInfo.isOverdue ? 'bold' : 'normal' }}>
+                                  ({isInProgress ? 'В работе: ' : isDone ? 'Итого: ' : ''}{timeInfo.text}){timeInfo.isOverdue && ' ⚠️ Превышение!'}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{masterInfo.master}</b></div>
                           </div>
-                          {sig?.signed ? (
-                            isNotRequired ? <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold' }}>— Не требуется</span> : <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span>
-                          ) : (
-                            canEdit ? (
-                              <div style={{ display: 'flex', gap: '4px' }}>
-                                <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, false)} disabled={loading}>Подписать</button>
-                                <button className="btn-secondary" style={{ width: 'auto', padding: '4px 6px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, true)} disabled={loading}>Н/Т</button>
+                          <div>
+                            {isDone ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <span style={{ color: 'var(--status-ready)', fontWeight: 'bold', fontSize: '10px' }}>✓ Готово</span>
+                                {canReworkShop(s.key) && (
+                                  <button 
+                                    className="btn-secondary" 
+                                    style={{ padding: '2px 6px', fontSize: '9px', color: 'var(--status-paused)' }} 
+                                    onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} 
+                                    disabled={loading}
+                                  >
+                                    ↺ Доработка
+                                  </button>
+                                )}
                               </div>
-                            ) : <span style={{ color: 'var(--status-queue)', fontSize: '10px' }}>⏳ Ожидает</span>
-                          )}
+                            ) : isNotRequired ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold', fontSize: '10px' }}>— Не требуется</span>
+                                {canEdit && (
+                                  <button className="btn-secondary" style={{ padding: '2px 6px', fontSize: '9px' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>
+                                    В работу
+                                  </button>
+                                )}
+                              </div>
+                            ) : isInProgress ? (
+                              canEdit ? (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <button className="btn-primary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'DONE')} disabled={loading}>Завершить</button>
+                                </div>
+                              ) : <span style={{ color: 'var(--brand)', fontSize: '10px', fontWeight: 'bold' }}>▶ В работе</span>
+                            ) : (
+                              canEdit ? (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <button className="btn-secondary" style={{ padding: '3px 8px', fontSize: '10px', width: 'auto' }} onClick={() => handleUpdateShopStage(s.key, 'IN_PROGRESS')} disabled={loading}>Начать</button>
+                                  <button className="btn-secondary" style={{ padding: '3px 6px', fontSize: '10px', width: 'auto', color: 'var(--text-secondary)' }} onClick={() => handleUpdateShopStage(s.key, 'NOT_REQUIRED')} disabled={loading}>Н/Т</button>
+                                </div>
+                              ) : <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>⏳ Ожидает</span>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
+              )}
 
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
-                  {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--status-ready)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--status-queue)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
-                  
-                  {(!allSigned || !hasActPhoto) && (
-                    <div style={{ fontSize: '11px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
-                      ⚠️ Завоз доступен после подписи акта всеми цехами (или отметки Н/Т) И загрузки фото Акта ВУ-22.
-                    </div>
-                  )}
-                  
-                  {isAdminOrOperator && (
-                    <>
-                      <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-                        <select 
-                          className="select-field" 
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ margin: 0 }} 
-                          value={track} 
-                          onChange={e => setTrack(e.target.value)}
-                        >
-                          <option value="Путь 1">Путь №1</option>
-                          <option value="Путь 2">Путь №2</option>
-                        </select>
-
-                        <select 
-                          className="select-field" 
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ margin: 0 }} 
-                          value={position} 
-                          onChange={e => setPosition(e.target.value)}
-                        >
-                          <option value="Позиция 1">Позиция 1</option>
-                          <option value="Позиция 2">Позиция 2</option>
-                          <option value="Позиция 3">Позиция 3</option>
-                        </select>
-                      </div>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || !hasActPhoto}>⏳ В очередь</button>
-                        <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || !hasActPhoto}>➡️ Завезти на путь</button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                {selectedMetrics && (
+              {isInitialPhase ? (
+                <>
                   <div className="premium-card">
-                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>⏱️ Анализ времени простоя</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
-                      <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
-                      <div>Общий ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--status-paused)' }}>{selectedMetrics.paused_hours} ч</b></div>
-                    </div>
-                    <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-subtle)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт:</span><b style={{ color: 'var(--status-ready)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
-                  </div>
-                )}
-                
-                {visibleTransitions.length > 0 && (
-                  <div className="premium-card">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                      <h4 style={{ margin: 0, fontSize: '12px' }}>Допустимые действия:</h4>
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>📝 ШАГ 1. Комиссионный Акт (ВУ-22)</h4>
+                    
+                    <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 'bold' }}>📸 Фото / Сканы Акта ВУ-22:</div>
+                        <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--status-ready)' : 'var(--status-paused)', marginTop: '2px' }}>
+                          {hasActPhoto ? `✓ Загружено файлов: ${actPhotoDocs.length} шт.` : '❌ Файлы не прикреплены (завоз заблокирован)'}
+                        </div>
+                      </div>
+
+                      {canUploadDocs && (
+                        <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
+                          {hasActPhoto ? '📷 Добавить ещё' : '📷 Загрузить фото'}
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
+                        </label>
+                      )}
                     </div>
 
-                    {!allShopsCompleted && (
-                      <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
-                        ⚠️ Все цеха должны завершить работу (или поставить «Н/Т») перед сменной статуса.
+                    {hasActPhoto && (
+                      <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'right' }}>
+                        {actPhotoDocs.map((doc, idx) => (
+                          <a key={doc.id || idx} href={doc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 'bold' }}>
+                            🔍 Открыть фото акта #{idx + 1}
+                          </a>
+                        ))}
                       </div>
                     )}
 
-                    {!hasCompletionDocs && (
-                      <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
-                        ⚠️ Для перевода в готовность/отправку прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
-                      </div>
-                    )}
-
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                      {visibleTransitions.map((st: string) => {
-                        const isTargetReady = isCompletionStatus(st);
-                        const isPause = st === CASE_STATUS.PAUSED;
-                        
-                        const isBlockedByShops = !isPause && !allShopsCompleted;
-                        const isDisabled = loading || (isTargetReady && !hasCompletionDocs) || isBlockedByShops;
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {ACT_SIGNING_SHOPS.map(s => {
+                        const sig = selectedCase.shop_signatures?.[s.key];
+                        const masterInfo = getAssignedMaster(s.key);
+                        const canEdit = canPerformAction(s.key);
+                        const isNotRequired = sig?.master_name === 'Не требуется';
 
                         return (
-                          <button 
-                            key={st} 
-                            disabled={isDisabled} 
-                            onClick={() => handleUpdateStatus(st)} 
-                            className="btn-primary" 
-                            style={{ 
-                              padding: '6px 10px', 
-                              fontSize: '11px', 
-                              width: 'auto', 
-                              opacity: isDisabled ? 0.5 : 1,
-                              cursor: isDisabled ? 'not-allowed' : 'pointer',
-                              background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' 
-                            }}
-                          >
-                            {st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}
-                          </button>
+                          <div key={s.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '6px', fontSize: '11px' }}>
+                            <div>
+                              <b>{s.label}</b>
+                              <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '2px' }}>Ответственный: <b>{sig?.master_name || masterInfo.master}</b>{sig?.signed_at && ` • ${new Date(sig.signed_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}</div>
+                            </div>
+                            {sig?.signed ? (
+                              isNotRequired ? <span style={{ color: 'var(--text-secondary)', fontWeight: 'bold' }}>— Не требуется</span> : <span style={{ color: 'var(--status-ready)', fontWeight: 'bold' }}>✓ Подписано</span>
+                            ) : (
+                              canEdit ? (
+                                <div style={{ display: 'flex', gap: '4px' }}>
+                                  <button className="btn-primary" style={{ width: 'auto', padding: '4px 8px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, false)} disabled={loading}>Подписать</button>
+                                  <button className="btn-secondary" style={{ width: 'auto', padding: '4px 6px', fontSize: '10px' }} onClick={() => handleSignAct(s.key, true)} disabled={loading}>Н/Т</button>
+                                </div>
+                              ) : <span style={{ color: 'var(--status-queue)', fontSize: '10px' }}>⏳ Ожидает</span>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
                   </div>
-                )}
 
-                <div className="premium-card">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand)' }}>📄 Документы и Акты</h4></div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
-                    {documents.map((d: any) => (
-                      <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
-                        <span>
-                          <b>{d.doc_type}</b> №{d.doc_number}
-                          {d.file_url && <a href={d.file_url} target="_blank" rel="noreferrer" style={{ marginLeft: '6px', color: 'var(--brand)', textDecoration: 'none' }}>[🖼️ Скан]</a>}
-                        </span>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{d.doc_date || ''}</span>
+                  <div className="premium-card">
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>🏗️ ШАГ 2. Размещение вагона</h4>
+                    {selectedCase.track_number ? <div style={{ fontSize: '11px', color: 'var(--status-ready)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>📍 Завезён на: <b>{selectedCase.track_number}, {selectedCase.position_number}</b></div> : <div style={{ fontSize: '11px', color: 'var(--status-queue)', marginBottom: '8px', background: 'var(--bg-main)', padding: '6px', borderRadius: '6px' }}>⏳ Находится в очереди с <b>{new Date(selectedCase.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</b></div>}
+                    
+                    {(!allSigned || !hasActPhoto) && (
+                      <div style={{ fontSize: '11px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
+                        ⚠️ Завоз доступен после подписи акта всеми цехами (или отметки Н/Т) И загрузки фото Акта ВУ-22.
                       </div>
-                    ))}
+                    )}
+                    
+                    {isAdminOrOperator && (
+                      <>
+                        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+                          <select 
+                            className="select-field" 
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ margin: 0 }} 
+                            value={track} 
+                            onChange={e => setTrack(e.target.value)}
+                          >
+                            <option value="Путь 1">Путь №1</option>
+                            <option value="Путь 2">Путь №2</option>
+                          </select>
+
+                          <select 
+                            className="select-field" 
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ margin: 0 }} 
+                            value={position} 
+                            onChange={e => setPosition(e.target.value)}
+                          >
+                            <option value="Позиция 1">Позиция 1</option>
+                            <option value="Позиция 2">Позиция 2</option>
+                            <option value="Позиция 3">Позиция 3</option>
+                          </select>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button className="btn-secondary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(false)} disabled={loading || !allSigned || !hasActPhoto}>⏳ В очередь</button>
+                          <button className="btn-primary" style={{ flex: 1, fontSize: '11px' }} onClick={() => handleAssignPosition(true)} disabled={loading || !allSigned || !hasActPhoto}>➡️ Завезти на путь</button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  {canUploadDocs && (
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      <select 
-                        className="select-field" 
-                        onPointerDown={(e) => e.stopPropagation()}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ margin: 0, flex: 1.2 }} 
-                        value={docType} 
-                        onChange={e => setDocType(e.target.value)}
-                      >
-                        {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
-                      </select>
-                      <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док. (необяз.)" value={docNumber} onChange={e => setDocNumber(e.target.value)} />
-                      
-                      <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px' }} onClick={handleAddDocumentTextOnly} disabled={loading}>Текст</button>
-                      <label className="btn-primary" style={{ width: 'auto', padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
-                        📷
-                        <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
-                      </label>
+                </>
+              ) : (
+                <>
+                  {selectedMetrics && (
+                    <div className="premium-card">
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'var(--brand)' }}>⏱️ Анализ времени простоя</h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px', fontSize: '11px' }}>
+                        <div>Всего в депо: <b>{selectedMetrics.total_dwell_hours} ч</b></div><div>В очереди: <b>{selectedMetrics.queue_hours} ч</b></div>
+                        <div>Общий ремонт: <b>{selectedMetrics.gross_repair_hours} ч</b></div><div>Задержки: <b style={{ color: 'var(--status-paused)' }}>{selectedMetrics.paused_hours} ч</b></div>
+                      </div>
+                      <div style={{ marginTop: '6px', paddingTop: '6px', borderTop: '1px solid var(--border-subtle)', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}><span>Чистый ремонт:</span><b style={{ color: 'var(--status-ready)' }}>{selectedMetrics.net_repair_hours} ч</b></div>
                     </div>
                   )}
-                </div>
-                
-                <div className="premium-card">
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>📜 Журнал событий</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {statusHistory.map((ev: any) => (
-                      <div key={ev.event_id || ev.event_datetime} style={{ fontSize: '10px', padding: '6px', background: 'var(--bg-main)', borderRadius: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}><span>{STATUS_RU[ev.new_status] || ev.new_status}</span><span style={{ color: 'var(--brand)', fontWeight: 'normal' }}>👤 {ev.users?.name || 'Система'}</span></div>
-                        <div style={{ color: 'var(--text-secondary)', fontSize: '9px', marginTop: '2px' }}>{new Date(ev.event_datetime).toLocaleString()}</div>
-                        {ev.comment && <div style={{ fontStyle: 'italic', marginTop: '2px', color: 'var(--text-primary)' }}>{ev.comment}</div>}
+                  
+                  {visibleTransitions.length > 0 && (
+                    <div className="premium-card">
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h4 style={{ margin: 0, fontSize: '12px' }}>Допустимые действия:</h4>
                       </div>
-                    ))}
+
+                      {!allShopsCompleted && (
+                        <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
+                          ⚠️ Все цеха должны завершить работу (или поставить «Н/Т») перед сменной статуса.
+                        </div>
+                      )}
+
+                      {!hasCompletionDocs && (
+                        <div style={{ fontSize: '10px', color: 'var(--status-paused)', marginBottom: '8px', fontWeight: 'bold' }}>
+                          ⚠️ Для перевода в готовность/отправку прикрепите АКТ ВУ-23 или Справку (2612 / ВУ-36М).
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {visibleTransitions.map((st: string) => {
+                          const isTargetReady = isCompletionStatus(st);
+                          const isPause = st === CASE_STATUS.PAUSED;
+                          
+                          const isBlockedByShops = !isPause && !allShopsCompleted;
+                          const isDisabled = loading || (isTargetReady && !hasCompletionDocs) || isBlockedByShops;
+
+                          return (
+                            <button 
+                              key={st} 
+                              disabled={isDisabled} 
+                              onClick={() => handleUpdateStatus(st)} 
+                              className="btn-primary" 
+                              style={{ 
+                                padding: '6px 10px', 
+                                fontSize: '11px', 
+                                width: 'auto', 
+                                opacity: isDisabled ? 0.5 : 1,
+                                cursor: isDisabled ? 'not-allowed' : 'pointer',
+                                background: st === CASE_STATUS.PAUSED ? 'var(--status-paused)' : 'var(--brand)' 
+                              }}
+                            >
+                              {st === CASE_STATUS.PAUSED ? '⛔ Сообщить о задержке' : `→ ${STATUS_RU[st] || st}`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="premium-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}><h4 style={{ margin: 0, fontSize: '13px', color: 'var(--brand)' }}>📄 Документы и Акты</h4></div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                      {documents.map((d: any) => (
+                        <div key={d.id || d.created_at} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-main)', padding: '6px 10px', borderRadius: '8px', fontSize: '11px' }}>
+                          <span>
+                            <b>{d.doc_type}</b> №{d.doc_number}
+                            {d.file_url && <a href={d.file_url} target="_blank" rel="noreferrer" style={{ marginLeft: '6px', color: 'var(--brand)', textDecoration: 'none' }}>[🖼️ Скан]</a>}
+                          </span>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{d.doc_date || ''}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {canUploadDocs && (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <select 
+                          className="select-field" 
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ margin: 0, flex: 1.2 }} 
+                          value={docType} 
+                          onChange={e => setDocType(e.target.value)}
+                        >
+                          {DOCUMENT_TYPES.map(dt => <option key={dt} value={dt}>{dt}</option>)}
+                        </select>
+                        <input className="input-field" style={{ margin: 0, flex: 0.8 }} type="text" placeholder="№ док. (необяз.)" value={docNumber} onChange={e => setDocNumber(e.target.value)} />
+                        
+                        <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px' }} onClick={handleAddDocumentTextOnly} disabled={loading}>Текст</button>
+                        <label className="btn-primary" style={{ width: 'auto', padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
+                          📷
+                          <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
+                        </label>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </>
-            )}
+                  
+                  <div className="premium-card">
+                    <h4 style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>📜 Журнал событий</h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {statusHistory.map((ev: any) => (
+                        <div key={ev.event_id || ev.event_datetime} style={{ fontSize: '10px', padding: '6px', background: 'var(--bg-main)', borderRadius: '6px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}><span>{STATUS_RU[ev.new_status] || ev.new_status}</span><span style={{ color: 'var(--brand)', fontWeight: 'normal' }}>👤 {ev.users?.name || 'Система'}</span></div>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '9px', marginTop: '2px' }}>{new Date(ev.event_datetime).toLocaleString()}</div>
+                          {ev.comment && <div style={{ fontStyle: 'italic', marginTop: '2px', color: 'var(--text-primary)' }}>{ev.comment}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
 
-            {activeRole === 'ADMIN' && (
-              <button 
-                className="btn-primary" 
-                style={{ background: 'var(--status-paused)', marginTop: '12px', width: '100%' }} 
-                onClick={handleDeleteCase} 
-                disabled={loading}
+              {activeRole === 'ADMIN' && (
+                <button 
+                  className="btn-primary" 
+                  style={{ background: 'var(--status-paused)', marginTop: '12px', width: '100%' }} 
+                  onClick={handleDeleteCase} 
+                  disabled={loading}
+                >
+                  🗑️ Удалить вагон из базы
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isGuest && showDelayModal && (
+          <div className="backdrop">
+            <div className="bottom-sheet">
+              <h3 style={{ margin: '0 0 10px 0', color: 'var(--status-paused)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
+              
+              <select 
+                className="select-field" 
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                value={delayType} 
+                onChange={e => setDelayType(e.target.value as any)}
               >
-                🗑️ Удалить вагон из базы
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+                <option value="PRIMARY">Основная задержка</option>
+                <option value="SECONDARY">Сопутствующая задержка</option>
+              </select>
+              
+              <select 
+                className="select-field" 
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                value={delayCategory} 
+                onChange={e => {
+                  const cat = e.target.value; setDelayCategory(cat);
+                  if (cat === 'Materials') { const info = getAssignedMaster('procurement'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Отдел снабжения / Закупки'); } 
+                  else if (cat === 'Equipment') { const info = getAssignedMaster('mechanic'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Начальник цеха'); } 
+                  else { setResponsibleParty(''); }
+                }}
+              >
+                <option value="Materials">Материалы / Запчасти</option>
+                <option value="Equipment">Поломка оборудования</option>
+                <option value="Customer">Заказчик</option>
+                <option value="Railway">ЖД</option>
+              </select>
+              <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
+              <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
+              <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Следующее действие" />
+              <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
 
-      {!isGuest && showDelayModal && (
-        <div className="backdrop">
-          <div className="bottom-sheet">
-            <h3 style={{ margin: '0 0 10px 0', color: 'var(--status-paused)', fontSize: '15px' }}>⛔ Регистрация задержки</h3>
-            
-            <select 
-              className="select-field" 
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              value={delayType} 
-              onChange={e => setDelayType(e.target.value as any)}
-            >
-              <option value="PRIMARY">Основная задержка</option>
-              <option value="SECONDARY">Сопутствующая задержка</option>
-            </select>
-            
-            <select 
-              className="select-field" 
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => e.stopPropagation()}
-              value={delayCategory} 
-              onChange={e => {
-                const cat = e.target.value; setDelayCategory(cat);
-                if (cat === 'Materials') { const info = getAssignedMaster('procurement'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Отдел снабжения / Закупки'); } 
-                else if (cat === 'Equipment') { const info = getAssignedMaster('mechanic'); setResponsibleParty(info.master !== 'Не назначен' ? info.master : 'Начальник цеха'); } 
-                else { setResponsibleParty(''); }
-              }}
-            >
-              <option value="Materials">Материалы / Запчасти</option>
-              <option value="Equipment">Поломка оборудования</option>
-              <option value="Customer">Заказчик</option>
-              <option value="Railway">ЖД</option>
-            </select>
-            <textarea className="textarea-field" value={delayCause} onChange={e => setDelayCause(e.target.value)} rows={2} placeholder="Причина задержки" />
-            <input className="input-field" type="text" value={responsibleParty} onChange={e => setResponsibleParty(e.target.value)} placeholder="Ответственный (ФИО)" />
-            <input className="input-field" type="text" value={nextAction} onChange={e => setNextAction(e.target.value)} placeholder="Следующее действие" />
-            <input className="input-field" type="date" value={actionDeadline} onChange={e => setActionDeadline(e.target.value)} placeholder="Срок устранения (дедлайн)" />
-
-            <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--status-paused)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
+              <div style={{ display: 'flex', gap: '6px', marginTop: '14px' }}><button className="btn-secondary" onClick={() => setShowDelayModal(false)}>Отмена</button><button className="btn-primary" style={{ background: 'var(--status-paused)' }} onClick={handleConfirmDelay} disabled={loading}>Заблокировать</button></div>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
+        )}
+      </div>
+    );
+  }
