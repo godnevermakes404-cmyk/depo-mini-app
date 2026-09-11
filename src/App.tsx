@@ -37,7 +37,7 @@ interface RepairCase {
   sla_deadline: string | null; planned_release: string | null; forecast_release: string | null;
   track_number: string | null; position_number: string | null;
   shop_signatures: Record<string, any>; shop_progress: Record<string, any>; current_shop: string | null;
-  contracts: Contract | any; wagons: Wagon | any;
+  contracts: Contract | any; wagons: Wagon | any; status_events?: any[];
 }
 interface DelayLog {
   id: string; repair_id: string; category: string; delay_type: string; cause: string;
@@ -114,7 +114,6 @@ function clearSession() {
 export default function App() {
   const [user, setUser] = useState<{ id: string; name: string; role: string; telegram_id?: string } | null>(null);
   
-  // Состояние для тестовой роли (только для ADMIN)
   const [testRole, setTestRole] = useState<string | null>(null);
   const activeRole = (user?.role === 'ADMIN' && testRole) ? testRole : (user?.role || 'GUEST');
 
@@ -189,7 +188,6 @@ export default function App() {
   const [track, setTrack] = useState('Путь 1');
   const [position, setPosition] = useState('Позиция 1');
 
-  // Ссылка на открытую карточку для предотвращения потери контекста (stale closure)
   const selectedCaseRef = useRef<RepairCase | null>(null);
 
   useEffect(() => {
@@ -211,18 +209,32 @@ export default function App() {
     return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
   };
 
+  // Функция получения имени принявшего сотрудника КПП
+  const getKppAcceptedBy = (item: RepairCase) => {
+    if (!item.status_events || item.status_events.length === 0) return null;
+    const kppEvent = item.status_events.find((ev: any) => 
+      ev.comment?.includes('КПП') || ev.new_status === '04 QUEUE' || ev.new_status === CASE_STATUS.QUEUE
+    ) || item.status_events[item.status_events.length - 1];
+
+    if (kppEvent?.users?.name) return kppEvent.users.name;
+    if (kppEvent?.comment) {
+      const match = kppEvent.comment.match(/Ответственный:\s*([^)]+)/);
+      if (match) return match[1].trim();
+    }
+    return null;
+  };
+
   useEffect(() => { 
     initAuthAndData(); 
   }, []);
 
-  // Ультра-быстрый Realtime
   useEffect(() => { 
     if (!user?.id) return;
 
     let t: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefresh = () => {
       if (t) clearTimeout(t);
-      t = setTimeout(() => loadData(), 150); // Мгновенный отклик (150ms)
+      t = setTimeout(() => loadData(), 150);
     };
 
     const realtimeChannel = supabase.channel('realtime-depo')
@@ -335,7 +347,6 @@ export default function App() {
     setTestRole(null);
   }
 
-  // Параллельная подгрузка всех данных (быстрый отклик)
   async function loadData() {
     const activeCaseId = selectedCaseRef.current?.repair_id;
 
@@ -344,7 +355,8 @@ export default function App() {
         repair_id, current_status, repair_type, created_at, sla_deadline, planned_release, forecast_release,
         track_number, position_number, shop_signatures, shop_progress, current_shop,
         contracts ( customer_name, sla_hours ),
-        wagons ( id, wagon_number, owner, owner_type )
+        wagons ( id, wagon_number, owner, owner_type ),
+        status_events ( event_datetime, comment, new_status, users ( name ) )
       `).order('created_at', { ascending: false }),
       supabase.from('delay_log').select('*').order('start_datetime', { ascending: false }),
       supabase.from('warehouse_items').select('*').order('name', { ascending: true }),
@@ -360,14 +372,12 @@ export default function App() {
       setDelayLogs((delayRes.data as DelayLog[]) || []);
       setDqViolations(runDataQualityChecks(fetchedRepairs, delayRes.data || []));
 
-      // Если карточка открыта — обновляем её состояние (статусы цехов, подписи и т.д.)
       if (activeCaseId) {
         const freshCase = fetchedRepairs.find(r => r.repair_id === activeCaseId);
         if (freshCase) setSelectedCase(freshCase);
       }
     }
 
-    // Если карточка открыта — параллельно подтягиваем свежий журнал, документы и метрики времени
     if (activeCaseId) {
       const [eventsRes, docsRes, timeRes] = await Promise.all([
         supabase.from('status_events').select('*, users(name, role)').eq('repair_id', activeCaseId).order('event_datetime', { ascending: false }),
@@ -404,10 +414,7 @@ export default function App() {
       vibrate('medium'); 
     }
   }
-  
-  // ============================================================
-  // 🔐 ПРАВА ДОСТУПА (RBAC)
-  // ============================================================
+
   const isGuest = activeRole === 'GUEST';
   const isAdminOrOperator = !isGuest && (activeRole === 'ADMIN' || activeRole === 'operator');
   
@@ -500,7 +507,6 @@ export default function App() {
     setSelectedCase(item);
     setEditingWagonNum(item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '' : item.wagons?.wagon_number || '');
 
-    // Быстрая первоначальная загрузка метрик, истории и документов при открытии
     const { data: timeMetrics } = await supabase.from('v_repair_time_metrics').select('*').eq('repair_id', item.repair_id).maybeSingle();
     if (timeMetrics) {
       const gross = Math.max(0, Number(timeMetrics.gross_repair_hours || 0));
@@ -524,14 +530,17 @@ export default function App() {
     if (isNaN(countNum) || countNum <= 0) { alert('Укажите корректное количество вагонов!'); return; }
 
     setLoading(true); vibrate('medium');
+    const registrarName = user?.name || 'Охрана КПП';
+
     const { error } = await supabase.rpc('register_kpp_arrival', {
       p_count: countNum,
-      p_user_id: getValidUserId(user)
+      p_user_id: getValidUserId(user),
+      p_user_name: registrarName
     });
 
     if (!error) {
-      notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон');
-      alert(`Успешно принято ${countNum} вагонов с КПП! Оператор может внести их реальные номера.`);
+      notifyWagonsArrivedBulk([], 'ДР', 'Собственный', 'Полувагон', registrarName);
+      alert(`Успешно принято ${countNum} вагонов с КПП! (Ответственный: ${registrarName}). Оператор может внести их реальные номера.`);
       setShowAddModal(false);
       setArrivalCount('1');
       loadData();
@@ -1089,6 +1098,7 @@ export default function App() {
                     {criticalWagons.map(item => {
                       const daysOnSite = Math.max(0, Math.floor((new Date().getTime() - new Date(item.created_at).getTime()) / (1000 * 60 * 60 * 24)));
                       const isPaused = item.current_status === CASE_STATUS.PAUSED;
+                      const acceptedBy = getKppAcceptedBy(item);
 
                       return (
                         <div 
@@ -1100,7 +1110,14 @@ export default function App() {
                             <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
                               № {item.wagons?.wagon_number?.startsWith('БЕЗ_№_') ? '⚠️ Требует номера' : item.wagons?.wagon_number}
                             </div>
-                            <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</div>
+                            <div style={{ color: 'var(--text-secondary)', fontSize: '10px' }}>
+                              {item.repair_type} • {item.wagons?.owner || 'Собственный'}
+                            </div>
+                            {acceptedBy && (
+                              <div style={{ fontSize: '10px', color: 'var(--brand)', fontWeight: '600', marginTop: '2px' }}>
+                                🛡️ Принял: {acceptedBy}
+                              </div>
+                            )}
                           </div>
                           <div style={{ textAlign: 'right' }}>
                             <span style={{ fontWeight: '800', color: isPaused ? 'var(--status-paused)' : daysOnSite > 3 ? 'var(--status-queue)' : 'var(--brand)' }}>
@@ -1227,6 +1244,7 @@ export default function App() {
                 const isUnassigned = item.wagons?.wagon_number?.startsWith('БЕЗ_№_');
                 const isBreached = item.forecast_release && item.sla_deadline && new Date(item.forecast_release) > new Date(item.sla_deadline);
                 const activeDelay = delayLogs.find(d => d.repair_id === item.repair_id && !d.end_datetime);
+                const acceptedBy = getKppAcceptedBy(item);
                 
                 const createdDate = item.created_at ? new Date(item.created_at) : new Date();
                 const formattedDate = createdDate.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -1251,7 +1269,10 @@ export default function App() {
                     </div>
                     
                     <div style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between' }}>
-                      <span>{item.repair_type} • {item.wagons?.owner || 'Собственный'}</span>
+                      <span>
+                        {item.repair_type} • {item.wagons?.owner || 'Собственный'}
+                        {acceptedBy && <span style={{ color: 'var(--brand)', fontWeight: '600', marginLeft: '6px' }}>🛡️ {acceptedBy}</span>}
+                      </span>
                       <span style={{ color: isBreached ? 'var(--status-paused)' : 'var(--text-secondary)', fontWeight: isBreached ? 'bold' : 'normal' }}>
                         {isBreached ? '⚠️ Риск срыва' : (item.track_number ? `${item.track_number}, ${item.position_number}` : 'Не назначен')}
                       </span>
