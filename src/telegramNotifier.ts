@@ -22,12 +22,22 @@ export function notifyWagonArrived(wagonNumber: string, repairType: string, owne
   sendRawTelegramMessage(message);
 }
 
-export function notifyWagonsArrivedBulk(wagonNumbers: string[], repairType: string, owner: string, wagonType: string) {
+export function notifyWagonsArrivedBulk(
+  wagonNumbers: string[],
+  repairType: string,
+  owner: string,
+  wagonType: string,
+  registeredBy?: string
+) {
+  const countText = wagonNumbers.length > 0 ? `${wagonNumbers.length} шт.` : 'Состав (без номеров)';
+  const numbersText = wagonNumbers.length > 0 ? wagonNumbers.join(', ') : 'Присваиваются оператором';
+  const registrarText = registeredBy ? `\n<b>Принял (КПП):</b> ${registeredBy}` : '';
+
   const message = 
 `🛡 <b>ОХРАНА: ПРИБЫТИЕ ВАГОНОВ НА КПП</b>
 ───────────────
-<b>Запущено вагонов:</b> ${wagonNumbers.length} шт.
-<b>Номера:</b> <code>${wagonNumbers.join(', ')}</code>
+<b>Количество:</b> ${countText}${registrarText}
+<b>Номера:</b> <code>${numbersText}</code>
 <b>Тип:</b> ${wagonType}
 <b>Вид ремонта:</b> <b>${repairType}</b>
 <b>Собственник:</b> ${owner}
