@@ -209,7 +209,6 @@ export default function App() {
     return st === CASE_STATUS.READY || st === '11 READY_TO_DISPATCH' || st === '12 DISPATCHED' || st === 'DISPATCHED';
   };
 
-  // Функция получения имени принявшего сотрудника КПП
   const getKppAcceptedBy = (item: RepairCase) => {
     if (!item.status_events || item.status_events.length === 0) return null;
     const kppEvent = item.status_events.find((ev: any) => 
@@ -596,77 +595,84 @@ export default function App() {
     setLoading(false);
   }
 
+  // МАССОВАЯ ЗАГРУЗКА ФОТО АКТА ВУ-22 (С поддержкой 5-10+ фото)
   async function handleUploadActPhoto(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedCase || !canUploadDocs) return;
-    
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0 || !selectedCase || !canUploadDocs) return;
+
     setLoading(true); vibrate('medium');
-    const fileExt = file.name.split('.').pop() || 'jpg';
-    const fileName = `${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
-    const filePath = `vu22/${fileName}`;
 
-    const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+    try {
+      const uploadPromises = files.map(async (file, index) => {
+        const fileExt = file.name.split('.').pop() || 'jpg';
+        const fileName = `${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
+        const filePath = `vu22/${fileName}`;
 
-    if (uploadError) {
-      alert('Ошибка загрузки фото в хранилище: ' + uploadError.message);
-      setLoading(false);
-      return;
-    }
+        const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+        if (uploadError) throw uploadError;
 
-    const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
-    
-    const { error: rpcError } = await supabase.rpc('add_document', {
-      p_repair_id: selectedCase.repair_id,
-      p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
-      p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number}`,
-      p_user_id: getValidUserId(user),
-      p_file_url: urlData.publicUrl
-    });
+        const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
 
-    if (!rpcError) {
-      alert('📷 Фото акта ВУ-22 успешно загружено!');
+        const { error: rpcError } = await supabase.rpc('add_document', {
+          p_repair_id: selectedCase.repair_id,
+          p_doc_type: 'АКТ ВУ-22 (Дефектная ведомость)',
+          p_doc_number: `ВУ-22-${selectedCase.wagons?.wagon_number || ''}`,
+          p_user_id: getValidUserId(user),
+          p_file_url: urlData.publicUrl
+        });
+        if (rpcError) throw rpcError;
+      });
+
+      await Promise.all(uploadPromises);
+      alert(`📷 Успешно загружено фото ВУ-22: ${files.length} шт.!`);
       loadData();
-    } else {
-      alert('Ошибка сохранения документа: ' + rpcError.message);
+    } catch (uploadErr: any) {
+      alert('Ошибка при массовой загрузке фото: ' + uploadErr.message);
+    } finally {
+      setLoading(false);
+      event.target.value = '';
     }
-    setLoading(false);
   }
 
+  // МАССОВАЯ ЗАГРУЗКА ЛЮБЫХ ДРУГИХ ДОКУМЕНТОВ/ФОТО
   async function handleUploadAnyDoc(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !selectedCase || !canUploadDocs) return;
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0 || !selectedCase || !canUploadDocs) return;
     
     setLoading(true); vibrate('medium');
-    const fileExt = file.name.split('.').pop() || 'jpg';
-    const fileName = `doc_${selectedCase.repair_id}_${Date.now()}.${fileExt}`;
-    const filePath = `vu22/${fileName}`; 
-
-    const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
-
-    if (uploadError) {
-      alert('Ошибка загрузки фото документа: ' + uploadError.message);
-      setLoading(false); return;
-    }
-
-    const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
     const finalDocNum = docNumber.trim() || `Б/Н`;
 
-    const { error: rpcError } = await supabase.rpc('add_document', {
-      p_repair_id: selectedCase.repair_id,
-      p_doc_type: docType,
-      p_doc_number: finalDocNum,
-      p_user_id: getValidUserId(user),
-      p_file_url: urlData.publicUrl
-    });
+    try {
+      const uploadPromises = files.map(async (file, index) => {
+        const fileExt = file.name.split('.').pop() || 'jpg';
+        const fileName = `doc_${selectedCase.repair_id}_${Date.now()}_${index}.${fileExt}`;
+        const filePath = `vu22/${fileName}`; 
 
-    if (!rpcError) {
-      alert(`📷 Документ "${docType}" успешно прикреплен!`);
+        const { error: uploadError } = await supabase.storage.from('act_photos').upload(filePath, file, { upsert: true });
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage.from('act_photos').getPublicUrl(filePath);
+
+        const { error: rpcError } = await supabase.rpc('add_document', {
+          p_repair_id: selectedCase.repair_id,
+          p_doc_type: docType,
+          p_doc_number: finalDocNum,
+          p_user_id: getValidUserId(user),
+          p_file_url: urlData.publicUrl
+        });
+        if (rpcError) throw rpcError;
+      });
+
+      await Promise.all(uploadPromises);
+      alert(`📷 Успешно прикреплено файлов "${docType}": ${files.length} шт.!`);
       setDocNumber('');
       loadData();
-    } else {
-      alert('Ошибка сохранения документа: ' + rpcError.message);
+    } catch (uploadErr: any) {
+      alert('Ошибка при массовой загрузке: ' + uploadErr.message);
+    } finally {
+      setLoading(false);
+      event.target.value = '';
     }
-    setLoading(false);
   }
 
   async function handleSignAct(shopKey: string, isNotRequired: boolean = false) {
@@ -842,8 +848,8 @@ export default function App() {
   
   const allSigned = selectedCase?.shop_signatures && ACT_SIGNING_SHOPS.every(s => selectedCase.shop_signatures[s.key]?.signed);
   
-  const actPhotoDoc = documents.find(d => d.doc_type?.includes('ВУ-22') && d.file_url);
-  const hasActPhoto = Boolean(actPhotoDoc);
+  const actPhotoDocs = documents.filter(d => d.doc_type?.includes('ВУ-22') && d.file_url);
+  const hasActPhoto = actPhotoDocs.length > 0;
 
   const allShopsCompleted = selectedCase?.shop_progress && DEFAULT_SHOPS.every(s => {
     const prog = selectedCase.shop_progress[s.key];
@@ -1922,25 +1928,27 @@ export default function App() {
                   
                   <div style={{ background: 'var(--bg-main)', padding: '8px', borderRadius: '8px', marginBottom: '8px', fontSize: '11px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontWeight: 'bold' }}>📸 Фото / Скан Акта ВУ-22:</div>
+                      <div style={{ fontWeight: 'bold' }}>📸 Фото / Сканы Акта ВУ-22:</div>
                       <div style={{ fontSize: '10px', color: hasActPhoto ? 'var(--status-ready)' : 'var(--status-paused)', marginTop: '2px' }}>
-                        {hasActPhoto ? '✓ Файл прикреплен и верифицирован' : '❌ Файл не прикреплен (завоз заблокирован)'}
+                        {hasActPhoto ? `✓ Загружено файлов: ${actPhotoDocs.length} шт.` : '❌ Файлы не прикреплены (завоз заблокирован)'}
                       </div>
                     </div>
 
                     {canUploadDocs && (
                       <label className="btn-primary" style={{ padding: '4px 8px', fontSize: '10px', width: 'auto', cursor: 'pointer', display: 'inline-block', margin: 0 }}>
-                        {hasActPhoto ? '📷 Заменить' : '📷 Загрузить фото'}
-                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
+                        {hasActPhoto ? '📷 Добавить ещё' : '📷 Загрузить фото'}
+                        <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadActPhoto} disabled={loading} />
                       </label>
                     )}
                   </div>
 
-                  {hasActPhoto && actPhotoDoc?.file_url && (
-                    <div style={{ marginBottom: '8px', textAlign: 'right' }}>
-                      <a href={actPhotoDoc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 'bold' }}>
-                        🔍 Открыть прикрепленное фото акта
-                      </a>
+                  {hasActPhoto && (
+                    <div style={{ marginBottom: '8px', display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'right' }}>
+                      {actPhotoDocs.map((doc, idx) => (
+                        <a key={doc.id || idx} href={doc.file_url} target="_blank" rel="noreferrer" style={{ fontSize: '10px', color: 'var(--brand)', textDecoration: 'none', fontWeight: 'bold' }}>
+                          🔍 Открыть фото акта #{idx + 1}
+                        </a>
+                      ))}
                     </div>
                   )}
 
@@ -2111,7 +2119,7 @@ export default function App() {
                       <button className="btn-secondary" style={{ width: 'auto', padding: '0 10px' }} onClick={handleAddDocumentTextOnly} disabled={loading}>Текст</button>
                       <label className="btn-primary" style={{ width: 'auto', padding: '0 10px', display: 'flex', alignItems: 'center', cursor: 'pointer', margin: 0 }}>
                         📷
-                        <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
+                        <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleUploadAnyDoc} disabled={loading} />
                       </label>
                     </div>
                   )}
